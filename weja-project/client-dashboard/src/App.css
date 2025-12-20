@@ -1,0 +1,39 @@
+/* App-specific overrides */
+
+.error-banner {
+  grid-column: 1 / -1;
+  background: rgba(255, 71, 87, 0.1);
+  border: 1px solid rgba(255, 71, 87, 0.3);
+  border-radius: 8px;
+  padding: 1rem;
+  color: #ff4757;
+  text-align: center;
+}
+
+.log-count {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+}
+
+.shield-icon {
+  font-size: 1.5rem;
+}
+
+/* Chart tooltip custom */
+.recharts-tooltip-wrapper {
+  outline: none !important;
+}
+
+.recharts-default-tooltip {
+  background: #1a1a2e !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 8px !important;
+}
+
+/* Legend styling */
+.recharts-legend-item-text {
+  color: #a0a0b8 !important;
+}
