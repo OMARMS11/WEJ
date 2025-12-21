@@ -1,6 +1,6 @@
 # WEJÀ - AI-Powered Web Application Firewall
 
-A microservices-based WAF MVP that combines rule-based detection with AI confidence scoring.
+A microservices-based WAF MVP that combines rule-based detection with **Hybrid AI Detection** (Logistic Regression + Pattern Matching).
 
 ## 🏗️ Architecture
 
@@ -93,6 +93,10 @@ node test_traffic.js
 - `GET /api/logs` - Fetch request logs
 - `GET /api/stats` - Get attack statistics
 - `GET /api/health` - Health check
+- `GET /api/blacklist` - List blacklisted IPs
+- `POST /api/blacklist` - Manually blacklist an IP
+- `DELETE /api/blacklist/:ip` - Remove IP from blacklist
+- `GET /api/top-attackers` - Get top attacking IPs with geolocation
 
 ### AI Engine (port 5000)
 - `POST /analyze` - Analyze request payload
@@ -105,7 +109,8 @@ node test_traffic.js
 - Command Injection
 
 ## 📊 Dashboard Features
-- Real-time request feed
-- Attack statistics
-- Attack type distribution chart
-- Traffic overview
+- Real-time request feed (Live/Blocked/Allowed)
+- Attack statistics and Block Rate
+- Interactive Charts (Attack Distribution, Traffic Overview)
+- **Attacker Map**: Tab-based view of top attacking IPs with geolocation
+- **Blacklist Manager**: View and unblock blacklisted IPs

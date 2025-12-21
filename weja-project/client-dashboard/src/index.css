@@ -118,7 +118,7 @@ body {
 .stats-row {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 1rem;
 }
 
@@ -144,6 +144,10 @@ body {
 
 .stat-card.allowed {
   border-color: rgba(38, 222, 129, 0.3);
+}
+
+.stat-card.blacklist {
+  border-color: rgba(165, 94, 234, 0.3);
 }
 
 .stat-label {
@@ -172,6 +176,10 @@ body {
 
 .stat-value.rate {
   color: var(--accent-orange);
+}
+
+.stat-value.blacklist {
+  color: var(--accent-purple);
 }
 
 /* ============ CARDS ============ */
@@ -204,15 +212,50 @@ body {
   overflow: auto;
 }
 
+/* ============ TAB NAVIGATION ============ */
+.tab-nav {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.tab-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.9rem;
+}
+
+.tab-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.tab-btn.active {
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+  border-color: transparent;
+  color: white;
+}
+
 /* ============ LIVE FEED ============ */
 .live-feed {
   max-height: 500px;
   overflow-y: auto;
 }
 
+.feed-header {
+  margin-bottom: 1rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
 .log-entry {
   display: grid;
-  grid-template-columns: auto 80px 1fr auto auto;
+  grid-template-columns: auto 80px 1fr auto auto auto;
   gap: 1rem;
   align-items: center;
   padding: 0.75rem 1rem;
@@ -273,6 +316,15 @@ body {
   white-space: nowrap;
 }
 
+.log-ip {
+  font-family: 'Fira Code', monospace;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
 .log-type {
   font-size: 0.75rem;
   padding: 0.25rem 0.5rem;
@@ -284,6 +336,122 @@ body {
 .log-time {
   font-size: 0.75rem;
   color: var(--text-muted);
+}
+
+/* ============ ATTACKERS TABLE ============ */
+.attackers-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.attackers-table th,
+.attackers-table td {
+  padding: 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.attackers-table th {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.attackers-table tbody tr {
+  transition: background 0.2s;
+}
+
+.attackers-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.attackers-table .blacklisted-row {
+  background: rgba(255, 71, 87, 0.05);
+}
+
+.rank {
+  font-weight: 700;
+  color: var(--accent-orange);
+}
+
+.ip-cell code {
+  font-family: 'Fira Code', monospace;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.location-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.country-flag {
+  font-size: 1.2rem;
+}
+
+.count-badge {
+  background: linear-gradient(135deg, var(--accent-red), #ff6b81);
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.status-badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.status-badge.blacklisted {
+  background: rgba(255, 71, 87, 0.2);
+  color: var(--accent-red);
+}
+
+.status-badge.active {
+  background: rgba(255, 165, 2, 0.2);
+  color: var(--accent-orange);
+}
+
+.type-badge {
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.type-badge.auto {
+  background: rgba(165, 94, 234, 0.2);
+  color: var(--accent-purple);
+}
+
+.type-badge.manual {
+  background: rgba(79, 142, 255, 0.2);
+  color: var(--accent-blue);
+}
+
+.remove-btn {
+  background: rgba(255, 71, 87, 0.2);
+  border: 1px solid rgba(255, 71, 87, 0.3);
+  color: var(--accent-red);
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.remove-btn:hover {
+  background: var(--accent-red);
+  color: white;
 }
 
 /* ============ CHARTS ============ */
@@ -358,13 +526,17 @@ body {
   }
   
   .stats-row {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .tab-nav {
+    flex-wrap: wrap;
   }
 }
 
 @media (max-width: 768px) {
   .stats-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
   
   .header {
@@ -377,4 +549,14 @@ body {
     grid-template-columns: 1fr 1fr;
     gap: 0.5rem;
   }
+
+  .attackers-table {
+    font-size: 0.85rem;
+  }
+
+  .attackers-table th,
+  .attackers-table td {
+    padding: 0.5rem;
+  }
 }
+
