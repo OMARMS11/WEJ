@@ -9,6 +9,7 @@ const axios = require('axios');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const Log = require('./models/Log');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
 
@@ -537,36 +538,24 @@ app.get('/api/top-attackers', async (req, res) => {
 });
 
 
-// ============ PROXY ROUTES ============
-// Apply WAF middleware and proxy to target
-app.use('/proxy', wafMiddleware, async (req, res) => {
-    try {
-        const targetUrl = `${CONFIG.TARGET_URL}${req.path}`;
 
-        const response = await axios({
-            method: req.method,
-            url: targetUrl,
-            params: req.query,
-            data: req.body,
-            headers: {
-                'Content-Type': req.headers['content-type'] || 'application/json'
-            },
-            timeout: 10000
-        });
+// Apply WAF first
+app.use(wafMiddleware);
 
-        res.status(response.status).json(response.data);
+// Then proxy everything
+app.use(
+    '/',
+    createProxyMiddleware({
+        target: CONFIG.TARGET_URL,
+        changeOrigin: true,
+        ws: true, // support websockets (important for dashboards)
+        proxyTimeout: 30000,
+        timeout: 30000
+    })
+);
 
-    } catch (error) {
-        if (error.response) {
-            res.status(error.response.status).json(error.response.data);
-        } else {
-            res.status(502).json({
-                error: 'Bad Gateway',
-                message: 'Unable to reach target server'
-            });
-        }
-    }
-});
+
+
 
 // ============ START SERVER ============
 app.listen(CONFIG.PORT, () => {
