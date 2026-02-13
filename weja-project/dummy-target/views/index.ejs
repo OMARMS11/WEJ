@@ -1,0 +1,55 @@
+<%- include('layout', { body: ` <div class="page-title">
+    <h2>🎯 Target Server Dashboard</h2>
+    <p>Interactive testing environment for WEJÀ WAF</p>
+    </div>
+
+    <div class="grid grid-4" style="margin-bottom: 2rem;">
+        <div class="card stat-card">
+            <div class="stat-value">${stats.comments}</div>
+            <div class="stat-label">Comments</div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value">${stats.searches}</div>
+            <div class="stat-label">Searches</div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value">6</div>
+            <div class="stat-label">Endpoints</div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value"
+                style="background: linear-gradient(135deg, #26de81, #00d9ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                ●</div>
+            <div class="stat-label">Status</div>
+        </div>
+    </div>
+
+    <h3 style="margin-bottom: 1rem; color: #a0a0b8;">Test Vulnerability Endpoints</h3>
+
+    <div class="grid grid-2">
+        <a href="/search" class="card link-card">
+            <h3>🔍 Search <span class="badge badge-sqli">SQL Injection</span></h3>
+            <p>Test search functionality with potential SQL injection patterns</p>
+        </a>
+
+        <a href="/login" class="card link-card">
+            <h3>🔐 Login <span class="badge badge-sqli">SQL Injection</span></h3>
+            <p>Test authentication with username/password injection attempts</p>
+        </a>
+
+        <a href="/comment" class="card link-card">
+            <h3>💬 Comments <span class="badge badge-xss">XSS</span></h3>
+            <p>Test comment submission with cross-site scripting payloads</p>
+        </a>
+
+        <a href="/file" class="card link-card">
+            <h3>📁 File Viewer <span class="badge badge-path">Path Traversal</span></h3>
+            <p>Test file access with directory traversal patterns</p>
+        </a>
+    </div>
+
+    <div class="proxy-info">
+        <p>💡 To test through the WAF proxy, access this server at:</p>
+        <code>http://localhost:3000/proxy/</code>
+    </div>
+    ` }) %>

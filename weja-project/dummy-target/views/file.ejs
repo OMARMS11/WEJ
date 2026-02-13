@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>
+        <%= title %> | WEJÀ Target
+    </title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+</head>
+
+<body>
+    <header class="header">
+        <h1>🎯 Target Server</h1>
+        <nav class="header-nav">
+            <a href="/">Dashboard</a>
+            <a href="/search">Search</a>
+            <a href="/login">Login</a>
+            <a href="/comment">Comments</a>
+            <a href="/file" class="active">Files</a>
+        </nav>
+        <div class="db-status <%= dbStatus %>">
+            <span class="status-dot"></span>
+            MongoDB: <%= dbStatus %>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="page-title">
+            <h2>📁 File Viewer</h2>
+            <p>Test path traversal detection with file requests</p>
+        </div>
+
+        <div style="max-width: 700px; margin: 0 auto;">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">View File</h3>
+                </div>
+                <div class="card-body">
+                    <form action="/file" method="GET">
+                        <div class="form-group">
+                            <label for="name">Filename</label>
+                            <input type="text" id="name" name="name" class="form-control"
+                                placeholder="Enter filename..." value="<%= filename %>">
+                        </div>
+                        <button type="submit" class="btn btn-primary">📄 View File</button>
+                    </form>
+
+                    <% if (content) { %>
+                        <div style="margin-top: 1.5rem;">
+                            <h4 style="color: #a0a0b8; margin-bottom: 0.5rem;">File Content:</h4>
+                            <div class="file-content">
+                                <%= content %>
+                            </div>
+                        </div>
+                        <% } %>
+
+                            <div class="hint-box" style="margin-top: 1.5rem;">
+                                <h4>💡 Test Path Traversal</h4>
+                                <ul>
+                                    <li><code>../../../etc/passwd</code></li>
+                                    <li><code>....//....//....//etc/passwd</code></li>
+                                    <li><code>/etc/passwd</code></li>
+                                    <li><code>..%2f..%2f..%2fetc/passwd</code></li>
+                                    <li><code>..\\..\\..\\windows\\system32\\config\\sam</code></li>
+                                </ul>
+                            </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="proxy-info">
+            <p>💡 Access via WAF proxy:</p>
+            <code>http://localhost:3000/proxy/file?name=YOUR_FILENAME</code>
+        </div>
+    </main>
+</body>
+
+</html>

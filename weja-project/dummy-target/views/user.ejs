@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>
+        <%= title %> | WEJÀ Target
+    </title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+</head>
+
+<body>
+    <header class="header">
+        <h1>🎯 Target Server</h1>
+        <nav class="header-nav">
+            <a href="/">Dashboard</a>
+            <a href="/search">Search</a>
+            <a href="/login">Login</a>
+            <a href="/comment">Comments</a>
+            <a href="/file">Files</a>
+        </nav>
+        <div class="db-status <%= dbStatus %>">
+            <span class="status-dot"></span>
+            MongoDB: <%= dbStatus %>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="page-title">
+            <h2>👤 User Profile</h2>
+            <p>User information page</p>
+        </div>
+
+        <div style="max-width: 500px; margin: 0 auto;">
+            <div class="card">
+                <div class="card-body">
+                    <div class="profile-header">
+                        <div class="profile-avatar">👤</div>
+                        <div class="profile-name">
+                            <%= user.name %>
+                        </div>
+                        <div class="profile-email">
+                            <%= user.email %>
+                        </div>
+
+                        <div class="profile-info">
+                            <div class="profile-info-item">
+                                <div class="profile-info-label">User ID</div>
+                                <div class="profile-info-value">
+                                    <%= user.id %>
+                                </div>
+                            </div>
+                            <div class="profile-info-item">
+                                <div class="profile-info-label">Joined</div>
+                                <div class="profile-info-value">
+                                    <%= user.joined %>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="proxy-info">
+            <p>💡 Access via WAF proxy:</p>
+            <code>http://localhost:3000/proxy/users/<%= user.id %></code>
+        </div>
+    </main>
+</body>
+
+</html>
