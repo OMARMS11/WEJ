@@ -1,0 +1,116 @@
+# ==========================================
+# Node.js / Express.js
+# ==========================================
+
+**/node_modules/
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/pnpm-debug.log*
+
+# Environment files
+**/.env
+**/.env.*
+!**/.env.example
+
+# Build / Distribution
+**/dist/
+**/build/
+**/.next/
+**/.nuxt/
+**/.cache/
+**/coverage/
+
+# Runtime logs
+**/logs/
+**/*.log
+
+# ==========================================
+# Python
+# ==========================================
+
+# Bytecode
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+
+# Virtual environments
+**/venv/
+**/.venv/
+**/env/
+**/.env/
+**/ENV/
+
+# Python packaging
+**/*.egg-info/
+**/.eggs/
+**/build/
+**/dist/
+**/*.egg
+
+# Testing & coverage
+**/.pytest_cache/
+**/.coverage
+**/.tox/
+**/.nox/
+**/htmlcov/
+
+# Jupyter
+**/.ipynb_checkpoints/
+
+# ==========================================
+# IDEs & Editors
+# ==========================================
+
+**/.vscode/
+**/.idea/
+**/*.swp
+**/*.swo
+**/*~
+
+# ==========================================
+# Operating System Files
+# ==========================================
+
+**/.DS_Store
+**/Thumbs.db
+**/desktop.ini
+
+# ==========================================
+# Docker
+# ==========================================
+
+**/.docker/
+
+# ==========================================
+# Temporary Files
+# ==========================================
+
+**/tmp/
+**/temp/
+**/*.tmp
+**/*.bak
+
+# ==========================================
+# Secrets & Certificates
+# ==========================================
+
+**/*.pem
+**/*.key
+**/*.crt
+**/*.p12
+
+# ==========================================
+# Database Files
+# ==========================================
+
+**/*.sqlite
+**/*.sqlite3
+**/*.db
+
+# ==========================================
+# Misc
+# ==========================================
+
+**/.eslintcache
+**/.sass-cache/
