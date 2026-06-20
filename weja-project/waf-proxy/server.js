@@ -9,6 +9,7 @@ const CONFIG = require('./config');
 const { connectDB } = require('./database/connection');
 const wafMiddleware = require('./middlewares/waf');
 const proxyMiddleware = require('./middlewares/proxy');
+const rateLimiter = require('./middlewares/rateLimiter');
 const apiRoutes = require('./routes/api');
 
 const app = express();
@@ -23,6 +24,9 @@ connectDB();
 
 // ============ API ROUTES ============
 app.use('/api', apiRoutes);
+
+// ============ RATE LIMITER ============
+app.use(rateLimiter);
 
 // ============ WAF & PROXY ============
 // Apply WAF to all other requests
