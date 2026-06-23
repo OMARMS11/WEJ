@@ -5,7 +5,7 @@
 
 const axios = require('axios');
 
-const WAF_URL = 'http://localhost:3000/proxy';
+const WAF_URL = 'http://localhost:3000';
 
 const testCases = [
     // Safe requests

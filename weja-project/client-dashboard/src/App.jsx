@@ -66,6 +66,16 @@ function App() {
     })
   }
 
+  const getFlagEmoji = (countryCode) => {
+    if (!countryCode || countryCode === 'XX') return '🌐';
+    const codePoints = countryCode
+      .toUpperCase()
+      .split('')
+      .map(char => 127397 + char.charCodeAt(0));
+    return String.fromCodePoint(...codePoints);
+  }
+
+
   const removeFromBlacklist = async (ip) => {
     try {
       await axios.delete(`${API_URL}/blacklist/${encodeURIComponent(ip)}`)
@@ -278,6 +288,9 @@ function App() {
                       <span className="log-method">{log.method}</span>
                       <span className="log-path">{log.path}</span>
                       <span className="log-ip">{log.sourceIp}</span>
+                      <span className="log-geo" style={{ fontSize: '0.9em', color: '#a0a0b8' }}>
+                        {log.geo ? `${getFlagEmoji(log.geo.countryCode)} ${log.geo.city || 'Unknown'}` : ''}
+                      </span>
                       <span className="log-type">{log.attackType}</span>
                       <span className="log-time">{formatTime(log.timestamp)}</span>
                     </div>
@@ -317,7 +330,7 @@ function App() {
                             <code>{attacker.ip}</code>
                           </td>
                           <td className="location-cell">
-                            <span className="country-flag">🌐</span>
+                            <span className="country-flag">{getFlagEmoji(attacker.geo?.countryCode)}</span>
                             {attacker.geo?.city}, {attacker.geo?.country}
                           </td>
                           <td className="attack-count">
@@ -368,7 +381,7 @@ function App() {
                             <code>{entry.ip}</code>
                           </td>
                           <td className="location-cell">
-                            <span className="country-flag">🌐</span>
+                            <span className="country-flag">{getFlagEmoji(entry.geo?.countryCode)}</span>
                             {entry.geo?.city}, {entry.geo?.country}
                           </td>
                           <td className="reason-cell">{entry.reason}</td>

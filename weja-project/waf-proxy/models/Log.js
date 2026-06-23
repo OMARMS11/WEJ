@@ -63,6 +63,16 @@ const LogSchema = new mongoose.Schema({
     responseTime: {
         type: Number,  // in milliseconds
         default: null
+    },
+    geo: {
+        type: {
+            country: { type: String, default: null },
+            countryCode: { type: String, default: null },
+            city: { type: String, default: null },
+            lat: { type: Number, default: null },
+            lon: { type: Number, default: null }
+        },
+        default: null
     }
 }, {
     timestamps: true

@@ -42,7 +42,8 @@ const wafMiddleware = async (req, res, next) => {
             blocked: true,
             attackType: 'BLACKLISTED',
             confidence: 1.0,
-            responseTime: Date.now() - startTime
+            responseTime: Date.now() - startTime,
+            geo: req.geoData
         }).catch(() => { });
 
         return res.status(403).json({
@@ -113,7 +114,8 @@ const wafMiddleware = async (req, res, next) => {
             blocked: analysis.blocked,
             attackType: analysis.type,
             confidence: analysis.confidence,
-            responseTime: responseTime
+            responseTime: responseTime,
+            geo: req.geoData
         }).catch(() => { });
 
         // Block malicious requests
@@ -150,7 +152,8 @@ const wafMiddleware = async (req, res, next) => {
             blocked: false,
             attackType: 'ERROR',
             confidence: 0,
-            responseTime: Date.now() - startTime
+            responseTime: Date.now() - startTime,
+            geo: req.geoData
         }).catch(() => { });
 
         next();
