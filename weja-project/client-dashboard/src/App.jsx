@@ -27,29 +27,38 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [activeTab, setActiveTab] = useState('live') // 'live' | 'attackers' | 'blacklist'
+  const [rateLimit, setRateLimit] = useState({
+  windowMs: 60000,
+  maxRequests: 50
+  })
+  const [isEditingRateLimit, setIsEditingRateLimit] = useState(false)
 
   const fetchData = useCallback(async () => {
     try {
       setError(null)
-      const [logsRes, statsRes, healthRes, attackersRes, blacklistRes] = await Promise.all([
+      const [logsRes, statsRes, healthRes, attackersRes, blacklistRes, rateLimitRes] = await Promise.all([
         axios.get(`${API_URL}/logs?limit=50`),
         axios.get(`${API_URL}/stats`),
         axios.get(`${API_URL}/health`),
         axios.get(`${API_URL}/top-attackers?limit=10`),
-        axios.get(`${API_URL}/blacklist`)
+        axios.get(`${API_URL}/blacklist`),
+        axios.get(`${API_URL}/rate-limit`)
       ])
       setLogs(logsRes.data.logs)
       setStats(statsRes.data)
       setHealth(healthRes.data)
       setTopAttackers(attackersRes.data.attackers || [])
       setBlacklist(blacklistRes.data.blacklist || [])
+      if (!isEditingRateLimit) {
+        setRateLimit(rateLimitRes.data)
+      }    
     } catch (err) {
       setError('Unable to connect to WAF Gateway')
       console.error('Failed to fetch data:', err)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [isEditingRateLimit])
 
   useEffect(() => {
     fetchData()
@@ -74,6 +83,21 @@ function App() {
       console.error('Failed to remove IP from blacklist:', err)
     }
   }
+
+ const updateRateLimit = async () => {
+  try {
+    await axios.post(`${API_URL}/rate-limit`, {
+      windowMs: rateLimit.windowMs,
+      maxRequests: rateLimit.maxRequests
+    })
+
+    setIsEditingRateLimit(false)
+    fetchData()
+    alert('Rate limit updated successfully')
+  } catch (err) {
+    console.error('Failed to update rate limit:', err)
+  }
+}
 
   const isHealthy = health &&
     health.waf === 'healthy' &&
@@ -109,6 +133,8 @@ function App() {
             ⚠️ {error} - Make sure WAF Gateway is running on port 3000
           </div>
         )}
+      
+    
 
         {/* Stats Row */}
         <div className="stats-row">
@@ -402,7 +428,76 @@ function App() {
                 )}
               </div>
             )}
+
+            
           </div>
+          
+        </div>
+        {/* Rate Limit Settings */}
+        <div className="rate-limit-card">
+          <div className="rate-limit-header">
+            <div className="rate-icon">⚙️</div>
+            <div>
+              <h2>Rate Limit Settings</h2>
+              <p>Configure the global rate limiting rules for incoming requests.</p>
+            </div>
+          </div>
+
+          <div className="rate-limit-divider"></div>
+
+          <div className="rate-limit-grid">
+            
+            <div className="rate-box">
+              <h3>🕒 Time Window (seconds)</h3>
+              <p>The time window in which requests are counted.</p>
+
+              <input
+                type="number"
+                value={rateLimit.windowMs / 1000}
+                onFocus={() => setIsEditingRateLimit(true)}
+                onChange={(e) =>
+                  setRateLimit((prev) => ({
+                    ...prev,
+                    windowMs: Number(e.target.value) * 1000
+                  }))
+                }
+              />
+
+              <small>Minimum 1 second</small>
+            </div>
+
+            <div className="rate-box">
+              <h3>📊 Max Requests</h3>
+              <p>Maximum number of requests allowed.</p>
+
+              <input
+                type="number"
+                value={rateLimit.maxRequests}
+                onFocus={() => setIsEditingRateLimit(true)}
+                onChange={(e) =>
+                  setRateLimit((prev) => ({
+                    ...prev,
+                    maxRequests: Number(e.target.value)
+                  }))
+                }
+              />
+
+              <small>Minimum 1 request</small>
+            </div>
+
+          </div>
+
+          <div className="rate-info">
+            ℹ️ Changes take effect immediately after saving.
+          </div>
+
+          <button className="save-btn" onClick={updateRateLimit}>
+            💾 Save
+          </button>
+
+          <p className="save-note">
+            Click Save to update the rate limit configuration.
+          </p>
         </div>
       </main>
     </div>

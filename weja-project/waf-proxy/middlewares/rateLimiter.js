@@ -1,9 +1,11 @@
 const requests = new Map();
 
-const WINDOW_MS = 60 * 1000; // 1 minute
-const MAX_REQUESTS = 50;
+const rateLimitConfig = {
+    windowMs: 60 * 1000,
+    maxRequests: 50
+};
 
-module.exports = (req, res, next) => {
+const rateLimiter = (req, res, next) => {
     const ip = req.ip;
     const now = Date.now();
 
@@ -13,19 +15,38 @@ module.exports = (req, res, next) => {
 
     let timestamps = requests.get(ip);
 
-    // remove expired timestamps
+    // Remove old requests outside the time window
     timestamps = timestamps.filter(
-        timestamp => now - timestamp < WINDOW_MS
+        timestamp => now - timestamp < rateLimitConfig.windowMs
     );
 
-    if (timestamps.length >= MAX_REQUESTS) {
+    // Check if limit exceeded
+    if (timestamps.length >= rateLimitConfig.maxRequests) {
         return res.status(429).json({
             error: 'Too many requests'
         });
     }
 
+    // Add current request
     timestamps.push(now);
     requests.set(ip, timestamps);
 
     next();
+};
+
+// Update config dynamically
+const updateRateLimit = (windowMs, maxRequests) => {
+    rateLimitConfig.windowMs = windowMs;
+    rateLimitConfig.maxRequests = maxRequests;
+};
+
+// Get current config
+const getRateLimit = () => {
+    return rateLimitConfig;
+};
+
+module.exports = {
+    rateLimiter,
+    updateRateLimit,
+    getRateLimit
 };

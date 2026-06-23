@@ -9,7 +9,7 @@ const CONFIG = require('./config');
 const { connectDB } = require('./database/connection');
 const wafMiddleware = require('./middlewares/waf');
 const proxyMiddleware = require('./middlewares/proxy');
-const rateLimiter = require('./middlewares/rateLimiter');
+const { rateLimiter } = require('./middlewares/rateLimiter');
 const apiRoutes = require('./routes/api');
 
 const app = express();
