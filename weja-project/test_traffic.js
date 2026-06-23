@@ -99,6 +99,29 @@ const testCases = [
         url: `${WAF_URL}/comment`,
         data: { content: '`whoami`' },
         expected: 403
+    },
+    // GeoLocation Testing
+    {
+        name: 'GeoLocation - US IP (Allowed/Logged)',
+        method: 'GET',
+        url: `${WAF_URL}/`,
+        headers: { 'X-Forwarded-For': '8.8.8.8' },
+        expected: 200 // Assuming US is not blocked by default, or change based on your config
+    },
+    {
+        name: 'GeoLocation - UK IP Attack',
+        method: 'GET',
+        url: `${WAF_URL}/search?q=' OR 1=1 --`,
+        headers: { 'X-Forwarded-For': '82.163.123.1' }, // The IP from your screenshot
+        expected: 403
+    },
+    {
+        name: 'GeoLocation - NL IP Attack',
+        method: 'POST',
+        url: `${WAF_URL}/comment`,
+        headers: { 'X-Forwarded-For': '2.16.14.0' }, // The other IP from your screenshot
+        data: { content: '<script>alert("XSS")</script>' },
+        expected: 403
     }
 ];
 
@@ -115,6 +138,7 @@ async function runTests() {
                 method: test.method,
                 url: test.url,
                 data: test.data,
+                headers: test.headers || {}, // Support custom headers
                 validateStatus: () => true, // Don't throw on any status
                 timeout: 5000
             };
