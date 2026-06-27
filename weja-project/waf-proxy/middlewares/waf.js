@@ -1,36 +1,33 @@
 const CONFIG = require('../config');
 const aiClient = require('../services/aiClient');
+const behaviouralModel = require('../services/behaviouralModel');
 const blacklistService = require('../services/blacklist');
 const logService = require('../database/logService');
+const ipRequestCounters = {}; // Track precise packet counts
 
-// ============ WAF MIDDLEWARE ============
 const wafMiddleware = async (req, res, next) => {
-    // Skip static assets & websocket upgrades
-    if (
-        req.method === 'GET' &&
-        (
-            req.path.startsWith('/static') ||//needs revision
-            req.path.endsWith('.js') ||
-            req.path.endsWith('.css') ||
-            req.path.endsWith('.png') ||
-            req.path.endsWith('.jpg') ||
-            req.path.endsWith('.svg') ||
-            req.path.endsWith('.ico') ||
-            req.headers.upgrade === 'websocket'
-        )
-    ) {
+    // 1. Static Assets Opt-out (Keep this to protect asset performance)
+    if (req.method === 'GET' && (
+        req.path.startsWith('/static') ||
+        req.path.endsWith('.js') ||
+        req.path.endsWith('.css') ||
+        req.path.endsWith('.png') ||
+        req.path.endsWith('.jpg') ||
+        req.path.endsWith('.svg') ||
+        req.path.endsWith('.ico') ||
+        req.headers.upgrade === 'websocket'
+    )) {
         return next();
     }
 
     const startTime = Date.now();
     const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
 
-    // CHECK BLACKLIST FIRST
+    // 2. Blacklist Inspection Gate
     if (blacklistService.isBlacklisted(clientIp)) {
         const entry = blacklistService.ipBlacklist.get(clientIp);
-        console.log(`🚫 BLACKLISTED IP: ${clientIp} - ${entry.reason}`);
+        console.log(`🚫 BLOCK (BLACKLISTED IP): ${clientIp} - ${entry.reason}`);
 
-        // Log the blocked request
         await logService.saveLog({
             method: req.method,
             path: req.path,
@@ -48,61 +45,55 @@ const wafMiddleware = async (req, res, next) => {
 
         return res.status(403).json({
             error: 'Request Blocked',
-            reason: 'IP Address is blacklisted',
+            reason: 'IP Address is blacklisted due to persistent behavioral anomalies.',
             blacklistReason: entry.reason,
             remainingTime: Math.ceil((CONFIG.BLACKLIST_DURATION - (Date.now() - entry.blockedAt)) / 1000) + 's'
         });
     }
 
-    // Extract request data for analysis
+    // Increment total packets seen from this IP
+    if (!ipRequestCounters[clientIp]) {
+        ipRequestCounters[clientIp] = 0;
+    }
+    ipRequestCounters[clientIp] += 1;
+
+    // 3. Compile Metric Metadata for the AI Request Packet
     const requestData = {
         method: req.method,
         path: req.path,
-        query: req.query,
-        body: req.body,
+        query: req.query || {},
+        body: req.body || {},
         headers: {
-            'user-agent': req.headers['user-agent'],
-            'content-type': req.headers['content-type'],
-            'host': req.headers['host']
-        }
+            'user-agent': req.headers['user-agent'] || '',
+            'content-type': req.headers['content-type'] || '',
+            'host': req.headers.host || ''
+        },
+        ip: clientIp, // Explicitly forward the client IP for sequence windows tracking
+        totalPackets: ipRequestCounters[clientIp]
     };
 
-    // Build payload object for AI analysis (query params + body + path)
-    const payloadObj = {
-        ...requestData.query,
-        ...(requestData.body || {}),
-        path: requestData.path
-    };
+    // Flatten parameters for the Tier 1 text fallback signature analysis string
+    const payloadObj = { ...requestData.query, ...requestData.body, path: requestData.path };
+    const payloadString = JSON.stringify(payloadObj);
 
-    // Skip inspection if there's nothing meaningful to analyze
-    // For GET requests: only inspect if there are query parameters
-    // For other methods: always inspect (body content is relevant)
-    const hasQueryParams = Object.keys(req.query || {}).length > 0;
-    if (req.method === 'GET' && !hasQueryParams) {
-        return next();
-    }
-
-    const payload = JSON.stringify(payloadObj);
-
-    if (Object.keys(payloadObj).length <= 1) {
-        // Only "path" key exists, nothing user-supplied to analyze
-        return next();
-    }
     try {
-        // Send to AI Engine for analysis
-        const aiResponse = await aiClient.post('/analyze', {
-            payload,
+        // HARDENED EXECUTION: Force Tier 2 behavioral checking for EVERY request flow.
+        // No short-circuits on query lengths or GET limits
+        console.log(`SENDING TO URL: ${aiClient.defaults.baseURL}/behavioural/analyze`);
+
+        const response = await aiClient.post('/behavioural/analyze', {
+            ip: clientIp,
+            payload: payloadString,
             method: req.method,
             path: req.path,
-            headers: requestData.headers
+            headers: requestData.headers,
+            totalPackets: requestData.totalPackets
         });
 
-
-        const analysis = aiResponse.data;
+        const analysis = response.data;
         const responseTime = Date.now() - startTime;
 
-        // Log the request
-        //made the logging non blocking to the request
+        // Log the structural evaluation to database records
         logService.saveLog({
             method: req.method,
             path: req.path,
@@ -118,45 +109,72 @@ const wafMiddleware = async (req, res, next) => {
             geo: req.geoData
         }).catch(() => { });
 
-        // Block malicious requests
+        // Handle Behavioral Drop Trigger
         if (analysis.blocked) {
-            // Track attack for auto-blacklisting
             blacklistService.trackAttack(clientIp, analysis.type);
+            console.log(`🚫 WAF BLOCK: ${req.method} ${req.path} -> Motive: ${analysis.type} (Conf: ${analysis.confidence})`);
 
-            console.log(`🚫 BLOCKED: ${req.method} ${req.path} - ${analysis.type} (${analysis.confidence})`);
             return res.status(403).json({
                 error: 'Request Blocked',
-                reason: 'Potential security threat detected',
+                reason: 'Potential security threat or abnormal request pattern detected.',
                 attackType: analysis.type,
                 confidence: analysis.confidence,
-                requestId: Date.now().toString() //the date is genrated on the fly not from the db to save time
+                requestId: Date.now().toString()
             });
         }
 
-        // Allow safe requests
-        console.log(`✅ ALLOWED: ${req.method} ${req.path}`);
+        console.log(`✅ WAF ALLOW: ${req.method} ${req.path}`);
         next();
 
     } catch (error) {
-        console.error('🔥 WAF Analysis Error:', error.message);
+        // FAILOVER LAYER: If Tier 2 route drops or breaks, instantly fall back to standard Tier 1 payload metrics
+        console.error("AXIOS ROUTING FAILED:", error.message, error.code);
+        console.warn(`⚠️ Tier 2 Router issue (${error.message}). Invoking Tier 1 Fallback Pipeline...`);
 
-        // Log the error but allow the request (fail-open for MVP)
-        await logService.saveLog({
-            method: req.method,
-            path: req.path,
-            query: req.query,
-            body: req.body,
-            headers: requestData.headers,
-            sourceIp: clientIp,
-            userAgent: req.headers['user-agent'] || '',
-            blocked: false,
-            attackType: 'ERROR',
-            confidence: 0,
-            responseTime: Date.now() - startTime,
-            geo: req.geoData
-        }).catch(() => { });
+        try {
+            const fallbackResponse = await aiClient.post('/analyze', {
+                ip: clientIp,
+                payload: payloadString,
+                method: req.method,
+                path: req.path,
+                headers: requestData.headers,
+                totalPackets: requestData.totalPackets
+            });
 
-        next();
+            const fallbackAnalysis = fallbackResponse.data;
+            const responseTime = Date.now() - startTime;
+
+            logService.saveLog({
+                method: req.method,
+                path: req.path,
+                query: req.query,
+                body: req.body,
+                headers: requestData.headers,
+                sourceIp: clientIp,
+                userAgent: req.headers['user-agent'] || '',
+                blocked: fallbackAnalysis.blocked,
+                attackType: fallbackAnalysis.type,
+                confidence: fallbackAnalysis.confidence,
+                responseTime: responseTime,
+                geo: req.geoData
+            }).catch(() => { });
+
+            if (fallbackAnalysis.blocked) {
+                blacklistService.trackAttack(clientIp, fallbackAnalysis.type);
+                console.log(`🚫 Fallback WAF BLOCK: ${req.method} ${req.path} -> Motive: ${fallbackAnalysis.type}`);
+                return res.status(403).json({
+                    error: 'Request Blocked',
+                    reason: 'Potential signature payload threat flagged by backup engine.',
+                    attackType: fallbackAnalysis.type
+                });
+            }
+
+            next();
+        } catch (fallbackError) {
+            console.error('Severe WAF Failure: Both Core and Fallback engines are unreachable.', fallbackError.message);
+            // Fail open securely or return 500 depending on project fail-open policies
+            next();
+        }
     }
 };
 

