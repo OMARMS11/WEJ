@@ -22,17 +22,17 @@ app.set('views', __dirname + '/views');
 
 // ============ MIDDLEWARE ============
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10kb' })); // Limit body size to 10kb to prevent payload-based DoS
+app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 
 // ============ DATABASE ============
 connectDB();
 
-// ============ API ROUTES ============
-app.use('/api', apiRoutes);
-
 // ============ RATE LIMITER ============
 app.use(rateLimiter);
+
+// ============ API ROUTES ============
+app.use('/api', apiRoutes);
 
 // ============ GEO-FILTER ============
 // Placed BEFORE WAF to block geo-denied IPs without AI Engine round-trip

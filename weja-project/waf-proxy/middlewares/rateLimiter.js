@@ -5,6 +5,19 @@ const rateLimitConfig = {
     maxRequests: 50
 };
 
+// Memory cleanup: Clear inactive IPs every 5 minutes to prevent Map unbounded growth
+setInterval(() => {
+    const now = Date.now();
+    for (const [ip, timestamps] of requests.entries()) {
+        const active = timestamps.filter(t => now - t < rateLimitConfig.windowMs);
+        if (active.length === 0) {
+            requests.delete(ip);
+        } else {
+            requests.set(ip, active);
+        }
+    }
+}, 5 * 60 * 1000);
+
 const rateLimiter = (req, res, next) => {
     const ip = req.ip;
     const now = Date.now();
@@ -38,6 +51,7 @@ const rateLimiter = (req, res, next) => {
 const updateRateLimit = (windowMs, maxRequests) => {
     rateLimitConfig.windowMs = windowMs;
     rateLimitConfig.maxRequests = maxRequests;
+    requests.clear();
 };
 
 // Get current config

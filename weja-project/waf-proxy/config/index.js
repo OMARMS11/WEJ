@@ -3,7 +3,7 @@ const path = require('path');
 // ============ CONFIGURATION ============
 const CONFIG = {
     PORT: process.env.PORT || 3000,
-    AI_ENGINE_URL: process.env.AI_ENGINE_URL || 'http://localhost:5000',
+    AI_ENGINE_URL: process.env.AI_ENGINE_URL || 'http://localhost:5005',
     TARGET_URL: process.env.TARGET_URL || 'http://localhost:4000',
     MONGODB_URI: process.env.MONGODB_URI || 'mongodb://localhost:27017/weja_waf',
 

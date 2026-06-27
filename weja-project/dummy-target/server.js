@@ -188,6 +188,14 @@ app.get('/users/:id', (req, res) => {
     });
 });
 
+app.get('/about', (req, res) => res.send('About Us'));
+app.get('/products', (req, res) => res.send('Products List'));
+app.post('/contact', (req, res) => res.json({ message: 'Contact saved' }));
+app.get('/style.css', (req, res) => {
+    res.setHeader('Content-Type', 'text/css');
+    res.send('body { background: #fff; }');
+});
+
 // ============ JSON API ROUTES ============
 
 // API: Home

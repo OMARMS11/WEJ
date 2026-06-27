@@ -133,7 +133,7 @@ const getTopAttackedRoutes = async (req, res) => {
                 { $match: { blocked: true } },
                 {
                     $group: {
-                        _id: '$targetPath',
+                        _id: '$path',
                         attackCount: { $sum: 1 },
                         lastAttack: { $max: '$timestamp' },
                         attackTypes: { $push: '$attackType' },

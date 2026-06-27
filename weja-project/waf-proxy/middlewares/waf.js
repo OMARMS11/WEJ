@@ -5,6 +5,13 @@ const blacklistService = require('../services/blacklist');
 const logService = require('../database/logService');
 const ipRequestCounters = {}; // Track precise packet counts
 
+// Memory cleanup: Reset packet counters every hour to prevent memory leaks
+setInterval(() => {
+    for (const ip in ipRequestCounters) {
+        delete ipRequestCounters[ip];
+    }
+}, 60 * 60 * 1000);
+
 const wafMiddleware = async (req, res, next) => {
     // 1. Static Assets Opt-out (Keep this to protect asset performance)
     if (req.method === 'GET' && (
@@ -43,24 +50,12 @@ const wafMiddleware = async (req, res, next) => {
             geo: req.geoData
         }).catch(() => { });
         
-        // Render the Blacklist page with additional details
-
         return res.status(403).json({
             error: 'Request Blocked',
             reason: 'IP Address is blacklisted due to persistent behavioral anomalies.',
             blacklistReason: entry.reason,
             remainingTime: Math.ceil((CONFIG.BLACKLIST_DURATION - (Date.now() - entry.blockedAt)) / 1000) + 's'
-        return res.status(403).render("Blacklist", {
-            requestId: Date.now().toString(),
         });
-
-        // return res.status(403).render("blocked", {
-        //     attackType: analysis.type,
-        //     confidence: `${analysis.confidence * 100}%`,
-        //     Detection_Engine: analysis.decision,
-        //     requestId: Date.now().toString(),
-           
-        // });
     }
 
     // Increment total packets seen from this IP
@@ -133,15 +128,6 @@ const wafMiddleware = async (req, res, next) => {
                 confidence: analysis.confidence,
                 requestId: Date.now().toString()
             });
-            console.log(`🚫 BLOCKED: ${req.method} ${req.path} - ${analysis.type} (${analysis.confidence})`);
-            
-            return res.status(403).render("blocked", {
-                attackType: analysis.type,
-                confidence: `${analysis.confidence * 100}%`,
-                 Detection_Engine: analysis.decision,
-                requestId: Date.now().toString(),
-
-            });            
         }
 
         console.log(`✅ WAF ALLOW: ${req.method} ${req.path}`);
