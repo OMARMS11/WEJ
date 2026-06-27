@@ -147,73 +147,144 @@ def predict_payload_anomaly(request_text):
 # 4. SIGNATURE RULES DEFENSE (TIER 1)
 # ==========================================
 
-SQL_PATTERNS = [
-    r"(\%27)|(\')|(\-\-)|(\%23)|(#)",
-    r"((\%3D)|(=))[^\n]*((\%27)|(\')|(\-\-)|(\%3B)|(;))",
-    r"\w*((\%27)|(\'))((\\\\%6F)|o|(\%4F))((\%72)|r|(\%52))",
-    r"((\%27)|(\'))union",
-    r"exec(\s|\+)+(s|x)p\w+",
-    r"(select|insert|update|delete|drop|truncate|alter)\s",
-    r"(\%27)|(\')\s*(or|and)\s*\d+\s*=\s*\d+",
-    r"1\s*=\s*1",
-    r"\'\s*or\s*\'"
+# SQL_PATTERNS = [
+#     r"(\%27)|(\')|(\-\-)|(\%23)|(#)",
+#     r"((\%3D)|(=))[^\n]*((\%27)|(\')|(\-\-)|(\%3B)|(;))",
+#     r"\w*((\%27)|(\'))((\\\\%6F)|o|(\%4F))((\%72)|r|(\%52))",
+#     r"((\%27)|(\'))union",
+#     r"exec(\s|\+)+(s|x)p\w+",
+#     r"(select|insert|update|delete|drop|truncate|alter)\s",
+#     r"(\%27)|(\')\s*(or|and)\s*\d+\s*=\s*\d+",
+#     r"1\s*=\s*1",
+#     r"\'\s*or\s*\'"
+# ]
+
+# XSS_PATTERNS = [
+#     r"<script[^>]*>.*?</script>",
+#     r"javascript\s*:",
+#     r"on\w+\s*=",
+#     r"<\s*img[^>]+onerror",
+#     r"<\s*svg[^>]+onload",
+#     r"<\s*iframe",
+#     r"<\s*embed",
+#     r"<\s*object",
+#     r"expression\s*\(",
+#     r"alert\s*\(",
+#     r"document\.(cookie|location|write)",
+#     r"eval\s*\("
+# ]
+
+# PATH_TRAVERSAL_PATTERNS = [
+#     r"\.\./",
+#     r"\.\.\\",
+#     r"%2e%2e%2f",
+#     r"%252e%252e%252f",
+#     r"etc/passwd",
+#     r"etc/shadow",
+#     r"windows/system32"
+# ]
+
+# COMMAND_INJECTION_PATTERNS = [
+#     r";\s*(ls|cat|whoami|id|pwd|uname)",
+#     r"\|\s*(ls|cat|whoami|id|pwd|uname)",
+#     r"`[^`]+`",
+#     r"\$\([^)]+\)",
+#     r"&&\s*(ls|cat|whoami|id|pwd|uname)"
+# ]
+
+SQLI_PATTERNS = [
+    (r"(\%27)|(\')|(\-\-)|(\%23)|(#)|(\/\*)|(\*\/)|(;--)|(\%3B--)", 20),
+    (r"((\%3D)|(=))[^\n]*((\%27)|(\')|(\-\-)|(\%3B)|(;)|(\/\*))", 30),
+    (r"(\b(or|and|xor)\b\s+\w+\s*=\s*\w+)", 35),
+    (r"(\w*\s*(or|and|xor)\s+\w+\s*=\s*\w+)", 30),
+    (r"((\%27)|(\')|(\%22)|(\"))\s*(union|UNION)\s+(all|ALL)?\s*select", 45),
+    (r"(union|UNION)\s+(all|ALL)?\s*select\s+.*?\s+from", 40),
+    (r"(exec|EXEC)\s*(\s|\+)+(s|x)p_\w+", 50),
+    (r"(exec|EXECUTE)\s*(\s|\+)*\(.*?\)", 40),
+    (r"\b(select|insert|update|delete|drop|truncate|alter|create|rename|replace)\s+", 25),
+    (r"(1\s*=\s*1|1\s*=\s*'1'|1\s*=\s*\"1\"|'1'\s*=\s*'1'|\"1\"\s*=\s*\"1\")", 35),
+    (r"(\'\s*(or|and|xor)\s*\'|\"\s*(or|and|xor)\s*\")", 35),
+    (r"\b(sleep|benchmark|pg_sleep|waitfor)\s*\(", 45),
+    (r"waitfor\s+delay\s+['\"]\d+:\d+:\d+['\"]", 50),
+    (r"\b(convert|cast)\s*\(.*?\s+as\s+", 35),
+    (r"\b(extractvalue|updatexml|floor)\s*\(.*?,.*?\)", 40),
+    (r";\s*(select|insert|update|delete|drop|truncate|alter|exec|execute)", 35),
+    (r"\b(database|user|version|current_user|system_user)\s*\(\)", 30),
+    (r"\b(@@version|@@datadir|@@basedir)\b", 35),
+    (r"0x[0-9a-fA-F]{4,}", 30),
+    (r"char\s*\([\d,]+\)", 25),
+    (r"unicode\s*(['\"][^'\"]+['\"])", 25),
+    (r"(\b(and|or|xor)\b\s+.*?\s*[=<>!]+\s*.*?\s*(and|or|xor)?\s*\w+\s*[=<>!]+\s*\w+)", 35),
+    (r"\b(substr|mid|left|right)\s*\(.*?,\s*\d+,\s*\d+\)\s*[=<>]", 35),
+    (r"\b(information_schema|sys\.|master\.|mysql\.|performance_schema)\b", 40),
+    (r"\b(load_file|into\s+outfile|into\s+dumpfile)\b", 50),
+    (r"\b(xp_cmdshell|xp_regread|xp_regwrite)\b", 50),
+    (r"\w+\s*\+\s*\w+\s*=\s*\w+", 25),
+    (r"(\/\*.*?\*\/)", 20),
 ]
 
 XSS_PATTERNS = [
-    r"<script[^>]*>.*?</script>",
-    r"javascript\s*:",
-    r"on\w+\s*=",
-    r"<\s*img[^>]+onerror",
-    r"<\s*svg[^>]+onload",
-    r"<\s*iframe",
-    r"<\s*embed",
-    r"<\s*object",
-    r"expression\s*\(",
-    r"alert\s*\(",
-    r"document\.(cookie|location|write)",
-    r"eval\s*\("
+    (r"<script[^>]*>.*?</script>", 50),
+    (r"javascript\s*:", 35),
+    (r"on\w+\s*=", 25),
+    (r"<\s*img[^>]+onerror", 40),
+    (r"<\s*svg[^>]+onload", 40),
+    (r"alert\s*\(", 25),
+    (r"eval\s*\(", 40),
 ]
 
-PATH_TRAVERSAL_PATTERNS = [
-    r"\.\./",
-    r"\.\.\\",
-    r"%2e%2e%2f",
-    r"%252e%252e%252f",
-    r"etc/passwd",
-    r"etc/shadow",
-    r"windows/system32"
+PATH_PATTERNS = [
+    (r"\.\./", 40),
+    (r"\.\.\\", 40),
+    (r"%2e%2e%2f", 40),
+    (r"etc/passwd", 60),
+    (r"etc/shadow", 60),
+    (r"windows/system32", 60),
 ]
 
-COMMAND_INJECTION_PATTERNS = [
-    r";\s*(ls|cat|whoami|id|pwd|uname)",
-    r"\|\s*(ls|cat|whoami|id|pwd|uname)",
-    r"`[^`]+`",
-    r"\$\([^)]+\)",
-    r"&&\s*(ls|cat|whoami|id|pwd|uname)"
+CMD_PATTERNS = [
+    (r";\s*(ls|cat|whoami|id|pwd|uname)", 50),
+    (r"\|\s*(ls|cat|whoami|id|pwd|uname)", 50),
+    (r"`[^`]+`", 50),
+    (r"\$\([^)]+\)", 50),
+    (r"&&\s*(ls|cat|whoami|id|pwd|uname)", 50),
 ]
 
-def scan_signature_rules(payload):
-    lower_payload = payload.lower()
-    for pattern in SQL_PATTERNS:
-        if re.search(pattern, lower_payload, re.IGNORECASE):
-            return True, 'SQL_INJECTION', 0.90
-    for pattern in XSS_PATTERNS:
-        if re.search(pattern, lower_payload, re.IGNORECASE):
-            return True, 'XSS', 0.88
-    for pattern in PATH_TRAVERSAL_PATTERNS:
-        if re.search(pattern, lower_payload, re.IGNORECASE):
-            return True, 'PATH_TRAVERSAL', 0.92
-    for pattern in COMMAND_INJECTION_PATTERNS:
-        if re.search(pattern, lower_payload, re.IGNORECASE):
-            return True, 'COMMAND_INJECTION', 0.94
-    return False, 'SAFE', 0.10
+ATTACKS = {
+    "sqli": SQLI_PATTERNS,
+    "xss": XSS_PATTERNS,
+    "path-traversal": PATH_PATTERNS,
+    "cmdi": CMD_PATTERNS,
+}
 
 
-def evaluate_hybrid_inspection(payload):
-    is_malicious, attack_type, rule_conf = scan_signature_rules(payload)
-    if is_malicious and rule_conf > 0.6:
-        return True, attack_type, round(rule_conf * 0.85, 2)
-    return False, 'SAFE', round(max(1 - rule_conf, 0.05), 2)
+def calculate_rule_confidence(payload, patterns):
+    score = 0
+    matched = []
+
+    for regex, weight in patterns:
+        if re.search(regex, payload, re.IGNORECASE):
+            score += weight
+            matched.append(regex)
+
+    return min(score / 100.0, 1.0), matched
+
+
+def rule_based_detect(payload):
+    payload_lower = payload.lower()
+
+    best_attack = 'SAFE'
+    best_conf = 0.0
+    best_matches = []
+
+    for attack, patterns in ATTACKS.items():
+        conf, matches = calculate_rule_confidence(payload_lower, patterns)
+        if conf > best_conf:
+            best_attack = attack
+            best_conf = conf
+            best_matches = matches
+
+    return best_conf > 0, best_attack, best_conf, best_matches
 
 
 def should_run_logistic_regression(behavioral_result):
@@ -233,17 +304,93 @@ def should_run_logistic_regression(behavioral_result):
     return True
 
 
-def detect_attack_type(payload: str) -> tuple:
-   
-    # Get ML result
+def normalize_ml_label(label):
+    if label is None:
+        return 'safe'
+    label_str = str(label).strip().lower().replace(' ', '-')
+    label_str = label_str.replace('_', '-')
+    if label_str in {'safe', 'norm', 'benign'}:
+        return 'safe'
+    if label_str in {'path-traversal', 'path-traversal-detected'}:
+        return 'path-traversal'
+    if label_str in {'command-injection', 'cmdi', 'command-injection-detected'}:
+        return 'cmdi'
+    return label_str
+
+
+def detect_attack_type(payload: str, behavioral_result=None) -> dict:
+    if not should_run_logistic_regression(behavioral_result):
+        return {
+            'blocked': True,
+            'type': behavioral_result.get('type', 'BEHAVIORAL_BLOCK'),
+            'confidence': behavioral_result.get('confidence', 0.95),
+            'rule_confidence': None,
+            'ml_confidence': None,
+            'matched_rules': [],
+            'decision': 'BEHAVIORAL_GATE',
+            'ml_ran': False
+        }
+
+    rule_hit, rule_type, rule_conf, matches = rule_based_detect(payload)
+
+    if rule_hit and rule_conf >= 0.95:
+        return {
+            'blocked': True,
+            'type': rule_type,
+            'confidence': round(rule_conf, 2),
+            'rule_confidence': round(rule_conf, 2),
+            'ml_confidence': None,
+            'ml_prediction': None,
+            'matched_rules': matches,
+            'decision': 'RULE_ONLY',
+            'ml_ran': False
+        }
+
     ml_type, ml_conf = predict_payload_anomaly(payload)
-    
-   
-    
-    if ml_type != "norm" and ml_conf > 0.6:
-        return True, ml_type, round(ml_conf * 0.85, 2)
-    # No threat detected
-    return False, "SAFE", round(max(1 - ml_conf, 0.05), 2)
+    ml_label = normalize_ml_label(ml_type)
+
+    blocked = False
+    final_type = 'SAFE'
+    final_conf = max( 1-ml_conf, 0.05)
+    decision = 'SAFE'
+
+    if rule_hit:
+        if ml_label == rule_type:
+            blocked = True
+            final_type = rule_type
+            final_conf = round(0.4 * rule_conf + 0.6 * ml_conf, 2)
+            decision = 'FUSION'
+        elif ml_label != 'safe' and ml_conf >= 0.9:
+            blocked = True
+            final_type = ml_label
+            final_conf = round(ml_conf, 2)
+            decision = 'ML_OVERRIDE'
+        elif rule_conf >= 0.6:
+            blocked = True
+            final_type = rule_type
+            final_conf = round(rule_conf, 2)
+            decision = 'RULE_PRIORITY'
+    elif ml_label != 'safe' and ml_conf >= 0.75:
+        blocked = True
+        final_type = ml_label
+        final_conf = round(ml_conf, 2)
+        decision = 'ML_ONLY'
+
+    if final_conf <= 0.05 and  final_type == 'SAFE':
+        blocked = True
+        decision = 'LOW_CONF_SAFE'
+
+    return {
+        'blocked': blocked,
+        'type': final_type,
+        'confidence': round(final_conf, 2),
+        'rule_confidence': round(rule_conf, 2),
+        'ml_prediction': ml_label,
+        'ml_confidence': round(ml_conf, 2),
+        'matched_rules': matches,
+        'decision': decision,
+        'ml_ran': True
+    }
 
 # ==========================================
 # 5. FLASK SERVER CONTROLLERS / ENDPOINTS
@@ -393,27 +540,28 @@ def fallback_analyze():
                 'ml_ran': False,
                 'behavioral_result': behavioral_result
             })
-        
-        is_blocked, attack_label, final_confidence = evaluate_hybrid_inspection(combined_string)
-        ml_label, ml_conf = predict_payload_anomaly(combined_string)
-        
+
+        analysis_result = detect_attack_type(combined_string, behavioral_result=behavioral_result)
         response_payload = {
-            'blocked': is_blocked,
-            'confidence': final_confidence,
-            'type': attack_label,
+            'blocked': analysis_result['blocked'],
+            'confidence': analysis_result['confidence'],
+            'type': analysis_result['type'],
             'analyzed_method': req_method,
             'analyzed_path': req_path,
             'payload_length': len(payload),
-            'ml_prediction': ml_label,
-            'ml_confidence': round(ml_conf, 2),
-            'ml_ran': True,
+            'ml_prediction': analysis_result['ml_prediction'],
+            'ml_confidence': analysis_result['ml_confidence'],
+            'rule_confidence': analysis_result['rule_confidence'],
+            'matched_rules': analysis_result['matched_rules'],
+            'decision': analysis_result['decision'],
+            'ml_ran': analysis_result['ml_ran'],
             'behavioral_result': behavioral_result
         }
         
-        if is_blocked:
-            app.logger.warning(f"Attack detected: {attack_label} (confidence: {final_confidence})")
+        if analysis_result['blocked']:
+            app.logger.warning(f"Attack detected: {analysis_result['type']} (confidence: {analysis_result['confidence']})")
         else:
-            app.logger.info(f"✅ Request clean (confidence: {final_confidence})")
+            app.logger.info(f"✅ Request clean (confidence: {analysis_result['confidence']}, type: {analysis_result['type']})")
             
         return jsonify(response_payload)
         

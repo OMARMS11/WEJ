@@ -1,56 +1,52 @@
 <!DOCTYPE html>
 <html>
-<head>
+  <head>
     <title>Access Blocked</title>
     <style>
-        body{
-            font-family: Arial;
-            background:#f4f4f4;
-            display:flex;
-            justify-content:center;
-            align-items:center;
-            height:100vh;
-        }
+      body {
+        font-family: Arial;
+        background: #f4f4f4;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+      }
 
-        .card{
-            background:white;
-            padding:40px;
-            border-radius:10px;
-            box-shadow:0 0 15px rgba(0,0,0,.2);
-            text-align:center;
-            max-width:500px;
-        }
+      .card {
+        background: white;
+        padding: 40px;
+        border-radius: 10px;
+        box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+        text-align: center;
+        max-width: 500px;
+      }
 
-        h1{
-            color:#d32f2f;
-        }
+      h1 {
+        color: #d32f2f;
+      }
 
-        .details{
-            margin-top:20px;
-            color:#555;
-        }
+      .details {
+        margin-top: 20px;
+        color: #555;
+      }
 
-        code{
-            background:#eee;
-            padding:4px 8px;
-        }
+      code {
+        background: #eee;
+        padding: 4px 8px;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
+    <div class="card">
+      <h1>🚫 Request Blocked</h1>
 
-<div class="card">
-    <h1>🚫 Request Blocked</h1>
+      <p><strong>Reason:</strong> <%= reason %></p>
 
-    <p>Your request has been identified as potentially malicious.</p>
-
-    <div class="details">
+      <div class="details">
         <p><strong>Attack Type:</strong> <%= attackType %></p>
         <p><strong>Confidence:</strong> <%= confidence %></p>
-        <p><strong>Detection Engine:</strong> <%= Detection_Engine %></p>
         <p><strong>Request ID:</strong> <code><%= requestId %></code></p>
+      </div>
     </div>
-
-</div>
-
-</body>
+  </body>
 </html>

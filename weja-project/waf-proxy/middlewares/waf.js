@@ -47,7 +47,7 @@ const wafMiddleware = async (req, res, next) => {
       .catch(() => {});
 
     // Render the Blacklist page with additional details
-    return res.status(403).json({
+    return res.status(403).render("blacklist", {
       error: "Request Blocked",
       reason:
         "IP Address is blacklisted due to persistent behavioral anomalies.",
@@ -57,13 +57,6 @@ const wafMiddleware = async (req, res, next) => {
           (CONFIG.BLACKLIST_DURATION - (Date.now() - entry.blockedAt)) / 1000,
         ) + "s",
     });
-    // return res.status(403).render("blocked", {
-    //     attackType: analysis.type,
-    //     confidence: `${analysis.confidence * 100}%`,
-    //     Detection_Engine: analysis.decision,
-    //     requestId: Date.now().toString(),
-
-    // });
   }
 
   // Increment total packets seen from this IP
@@ -127,6 +120,9 @@ const wafMiddleware = async (req, res, next) => {
         blocked: analysis.blocked,
         attackType: analysis.type,
         confidence: analysis.confidence,
+        rule_confidence: analysis.rule_confidence,
+        ml_confidence: analysis.ml_confidence,
+        decision: analysis.decision,
         responseTime: responseTime,
         geo: req.geoData,
       })
@@ -139,7 +135,7 @@ const wafMiddleware = async (req, res, next) => {
         `🚫 WAF BLOCK: ${req.method} ${req.path} -> Motive: ${analysis.type} (Conf: ${analysis.confidence})`,
       );
 
-      return res.status(403).json({
+      return res.status(403).render("blocked", {
         error: "Request Blocked",
         reason:
           "Potential security threat or abnormal request pattern detected.",
@@ -167,7 +163,7 @@ const wafMiddleware = async (req, res, next) => {
         console.log(
           `🚫 Hybrid WAF BLOCK: ${req.method} ${req.path} -> Motive: ${hybridAnalysis.type} (Conf: ${hybridAnalysis.confidence})`,
         );
-        return res.status(403).json({
+        return res.status(403).render("blocked", {
           error: "Request Blocked",
           reason:
             "Potential payload threat detected after behavioral inspection.",
@@ -225,11 +221,12 @@ const wafMiddleware = async (req, res, next) => {
         console.log(
           `🚫 Fallback WAF BLOCK: ${req.method} ${req.path} -> Motive: ${fallbackAnalysis.type}`,
         );
-        return res.status(403).json({
+        return res.status(403).render("blocked", {
           error: "Request Blocked",
           reason:
             "Potential signature payload threat flagged by backup engine.",
           attackType: fallbackAnalysis.type,
+          confidence: fallbackAnalysis.confidence,
         });
       }
 
