@@ -108,25 +108,25 @@ const wafMiddleware = async (req, res, next) => {
     const responseTime = Date.now() - startTime;
 
     // Log the structural evaluation to database records
-    logService
-      .saveLog({
-        method: req.method,
-        path: req.path,
-        query: req.query,
-        body: req.body,
-        headers: requestData.headers,
-        sourceIp: clientIp,
-        userAgent: req.headers["user-agent"] || "",
-        blocked: analysis.blocked,
-        attackType: analysis.type,
-        confidence: analysis.confidence,
-        rule_confidence: analysis.rule_confidence,
-        ml_confidence: analysis.ml_confidence,
-        decision: analysis.decision,
-        responseTime: responseTime,
-        geo: req.geoData,
-      })
-      .catch(() => {});
+    // logService
+    //   .saveLog({
+    //     method: req.method,
+    //     path: req.path,
+    //     query: req.query,
+    //     body: req.body,
+    //     headers: requestData.headers,
+    //     sourceIp: clientIp,
+    //     userAgent: req.headers["user-agent"] || "",
+    //     blocked: analysis.blocked,
+    //     attackType: analysis.type,
+    //     confidence: analysis.confidence,
+    //     rule_confidence: analysis.rule_confidence,
+    //     ml_confidence: analysis.ml_confidence,
+    //     decision: analysis.decision,
+    //     responseTime: responseTime,
+    //     geo: req.geoData,
+    //   })
+    //   .catch(() => {});
 
     // Handle Behavioral Drop Trigger
     if (analysis.blocked) {
@@ -157,6 +157,26 @@ const wafMiddleware = async (req, res, next) => {
       });
 
       const hybridAnalysis = hybridResponse.data;
+      // Log the structural evaluation to database records
+      logService
+        .saveLog({
+          method: req.method,
+          path: req.path,
+          query: req.query,
+          body: req.body,
+          headers: requestData.headers,
+          sourceIp: clientIp,
+          userAgent: req.headers["user-agent"] || "",
+          blocked: hybridAnalysis.blocked,
+          attackType: hybridAnalysis.type,
+          confidence: hybridAnalysis.confidence,
+          rule_confidence: hybridAnalysis.rule_confidence,
+          ml_confidence: hybridAnalysis.ml_confidence,
+          decision: hybridAnalysis.decision,
+          responseTime: responseTime,
+          geo: req.geoData,
+        })
+        .catch(() => {});
 
       if (hybridAnalysis.blocked) {
         blacklistService.trackAttack(clientIp, hybridAnalysis.type);
