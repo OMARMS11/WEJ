@@ -107,27 +107,6 @@ const wafMiddleware = async (req, res, next) => {
     const analysis = response.data;
     const responseTime = Date.now() - startTime;
 
-    // Log the structural evaluation to database records
-    logService
-      .saveLog({
-        method: req.method,
-        path: req.path,
-        query: req.query,
-        body: req.body,
-        headers: requestData.headers,
-        sourceIp: clientIp,
-        userAgent: req.headers["user-agent"] || "",
-        blocked: analysis.blocked,
-        attackType: analysis.type,
-        confidence: analysis.confidence,
-        rule_confidence: analysis.rule_confidence,
-        ml_confidence: analysis.ml_confidence,
-        decision: analysis.decision,
-        responseTime: responseTime,
-        geo: req.geoData,
-      })
-      .catch(() => {});
-
     // Handle Behavioral Drop Trigger
     if (analysis.blocked) {
       blacklistService.trackAttack(clientIp, analysis.type);
@@ -158,6 +137,30 @@ const wafMiddleware = async (req, res, next) => {
 
       const hybridAnalysis = hybridResponse.data;
 
+      const analysis = response.data;
+      const responseTime = Date.now() - startTime;
+
+      // Log the structural evaluation to database records
+      logService
+        .saveLog({
+          method: req.method,
+          path: req.path,
+          query: req.query,
+          body: req.body,
+          headers: requestData.headers,
+          sourceIp: clientIp,
+          userAgent: req.headers["user-agent"] || "",
+          blocked: hybridAnalysis.blocked,
+          attackType: hybridAnalysis.type,
+          confidence: hybridAnalysis.confidence,
+          rule_confidence: hybridAnalysis.rule_confidence,
+          ml_confidence: hybridAnalysis.ml_confidence,
+          decision: hybridAnalysis.decision,
+          responseTime: responseTime,
+          geo: req.geoData,
+        })
+        .catch(() => {});
+
       if (hybridAnalysis.blocked) {
         blacklistService.trackAttack(clientIp, hybridAnalysis.type);
         console.log(
@@ -169,6 +172,7 @@ const wafMiddleware = async (req, res, next) => {
             "Potential payload threat detected after behavioral inspection.",
           attackType: hybridAnalysis.type,
           confidence: hybridAnalysis.confidence,
+          decision: hybridAnalysis.decision,
           requestId: Date.now().toString(),
         });
       }
