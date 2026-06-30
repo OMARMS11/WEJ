@@ -189,6 +189,7 @@ const wafMiddleware = async (req, res, next) => {
             "Potential payload threat detected after behavioral inspection.",
           attackType: hybridAnalysis.type,
           confidence: hybridAnalysis.confidence,
+          decision: hybridAnalysis.decision,
           requestId: Date.now().toString(),
         });
       }
@@ -247,6 +248,7 @@ const wafMiddleware = async (req, res, next) => {
             "Potential signature payload threat flagged by backup engine.",
           attackType: fallbackAnalysis.type,
           confidence: fallbackAnalysis.confidence,
+          decision: fallbackAnalysis.decision,
         });
       }
 

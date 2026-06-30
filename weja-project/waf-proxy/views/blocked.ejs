@@ -44,7 +44,10 @@
 
       <div class="details">
         <p><strong>Attack Type:</strong> <%= attackType %></p>
-        <p><strong>Confidence:</strong> <%= confidence %></p>
+        <p>
+          <strong>Confidence:</strong> <%= (confidence * 100).toFixed(2) %>%
+        </p>
+        <p><strong>Decision:</strong> <%= decision %></p>
         <p><strong>Request ID:</strong> <code><%= requestId %></code></p>
       </div>
     </div>
