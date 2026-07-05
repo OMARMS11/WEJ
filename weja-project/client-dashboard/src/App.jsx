@@ -15,7 +15,7 @@ import {
 } from "recharts";
 import "./App.css";
 
-const API_URL = "http://localhost:3000/api";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
 const COLORS = {
   SQL_INJECTION: "#ff4757",
@@ -592,7 +592,7 @@ function App() {
 
           <div className="rate-limit-grid">
             <div className="rate-box">
-              <h3>🕒 Time Window (seconds)</h3>
+              <h3>🕒 Time Window</h3>
               <p>The time window in which requests are counted.</p>
 
               <input

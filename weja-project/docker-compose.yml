@@ -1,0 +1,72 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: weja-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  ai-engine:
+    build:
+      context: ./ai-engine
+      dockerfile: Dockerfile
+    container_name: weja-ai-engine
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      AI_ENGINE_PORT: 5000
+      PORT: 5000
+
+  dummy-target:
+    build:
+      context: ./dummy-target
+      dockerfile: Dockerfile
+    container_name: weja-dummy-target
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      TARGET_PORT: 4000
+      PORT: 4000
+      MONGODB_URI: mongodb://mongo:27017/weja-target
+    depends_on:
+      - mongo
+
+  waf-proxy:
+    build:
+      context: ./waf-proxy
+      dockerfile: Dockerfile
+    container_name: weja-waf-proxy
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      AI_ENGINE_URL: http://ai-engine:5000
+      AI_ENGINE_PORT: 5000
+      TARGET_URL: http://dummy-target:4000
+      TARGET_PORT: 4000
+      MONGODB_URI: mongodb://mongo:27017/weja_waf
+    depends_on:
+      - mongo
+      - ai-engine
+      - dummy-target
+
+  client-dashboard:
+    build:
+      context: ./client-dashboard
+      dockerfile: Dockerfile
+    container_name: weja-client-dashboard
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:3000/api
+    depends_on:
+      - waf-proxy
+
+volumes:
+  mongo-data:

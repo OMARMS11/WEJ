@@ -107,6 +107,27 @@ const wafMiddleware = async (req, res, next) => {
     const analysis = response.data;
     const responseTime = Date.now() - startTime;
 
+    // Log the structural evaluation to database records
+    // logService
+    //   .saveLog({
+    //     method: req.method,
+    //     path: req.path,
+    //     query: req.query,
+    //     body: req.body,
+    //     headers: requestData.headers,
+    //     sourceIp: clientIp,
+    //     userAgent: req.headers["user-agent"] || "",
+    //     blocked: analysis.blocked,
+    //     attackType: analysis.type,
+    //     confidence: analysis.confidence,
+    //     rule_confidence: analysis.rule_confidence,
+    //     ml_confidence: analysis.ml_confidence,
+    //     decision: analysis.decision,
+    //     responseTime: responseTime,
+    //     geo: req.geoData,
+    //   })
+    //   .catch(() => {});
+
     // Handle Behavioral Drop Trigger
     if (analysis.blocked) {
       blacklistService.trackAttack(clientIp, analysis.type);
@@ -136,10 +157,6 @@ const wafMiddleware = async (req, res, next) => {
       });
 
       const hybridAnalysis = hybridResponse.data;
-
-      const analysis = response.data;
-      const responseTime = Date.now() - startTime;
-
       // Log the structural evaluation to database records
       logService
         .saveLog({
@@ -231,6 +248,7 @@ const wafMiddleware = async (req, res, next) => {
             "Potential signature payload threat flagged by backup engine.",
           attackType: fallbackAnalysis.type,
           confidence: fallbackAnalysis.confidence,
+          decision: fallbackAnalysis.decision,
         });
       }
 
