@@ -1,4 +1,4 @@
-# WEJÀ - AI-Powered Web Application Firewall
+# WEJAÀ - AI-Powered Web Application Firewall
 
 A microservices-based WAF MVP that combines a two-layer defense model:
 
