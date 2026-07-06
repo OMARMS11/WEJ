@@ -24,9 +24,12 @@ const proxyMiddleware = (req, res) => {
     );
 
     proxyReq.on('error', (err) => {
-        console.error('🔥 Proxy error:', err.message);
+        const detail = err.code
+            || (err.errors && err.errors.map(e => e.message).join('; '))
+            || err.message || String(err);
+        console.error('🔥 Proxy error:', detail);
         if (!res.headersSent) {
-            res.status(502).json({ error: 'Bad Gateway', message: err.message });
+            res.status(502).json({ error: 'Bad Gateway', message: detail });
         }
     });
 

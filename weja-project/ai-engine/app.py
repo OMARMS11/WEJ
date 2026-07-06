@@ -3,6 +3,7 @@ import re
 import sys
 import time
 import math
+import hmac
 import numpy as np
 import pandas as pd
 from flask import Flask, request, jsonify
@@ -12,6 +13,53 @@ from collections import Counter
 
 app = Flask(__name__)
 CORS(app)
+
+# ==========================================
+# 0. TRAINING / OBSERVATION MODE CONFIG
+# ==========================================
+# WAF_TRAINING_MODE=1  -> requests carrying the shared secret are never banned,
+#                         and every computed feature window is captured for export.
+# WAF_OBSERVATION_MODE=1 -> model runs and logs, but NO IP is ever banned (global).
+# WAF_TRAINING_SECRET  -> shared secret between Node proxy and this engine.
+# WAF_ATTACK_LABEL     -> the integer label that means "Attack" in the trained
+#                         model's classes_ (default 1). predict_proba columns are
+#                         looked up from this, never hardcoded by position.
+TRAINING_MODE = os.environ.get('WAF_TRAINING_MODE', '0') == '1'
+OBSERVATION_MODE = os.environ.get('WAF_OBSERVATION_MODE', '0') == '1'
+TRAINING_SECRET = os.environ.get('WAF_TRAINING_SECRET', '')
+ATTACK_LABEL = int(os.environ.get('WAF_ATTACK_LABEL', '1'))
+
+# Feature windows captured while in training mode (one row per analyzed request)
+training_rows = []
+
+
+def is_training_request(data):
+    """True only when training mode is on AND the caller presents the shared secret
+    (either forwarded by the Node proxy in the JSON body, or as a header for curl)."""
+    if not (TRAINING_MODE and TRAINING_SECRET):
+        return False
+    supplied = ''
+    if isinstance(data, dict):
+        supplied = str(data.get('trainingSecret') or '')
+    if not supplied:
+        supplied = request.headers.get('x-waf-training', '')
+    return hmac.compare_digest(supplied, TRAINING_SECRET)
+
+
+def _admin_secret_ok():
+    """Guard for the training admin endpoints (/training/*, /export_normal)."""
+    if not TRAINING_SECRET:
+        return True  # no secret configured -> local dev, leave open
+    supplied = request.headers.get('x-waf-training', '') or request.args.get('secret', '')
+    return hmac.compare_digest(supplied, TRAINING_SECRET)
+
+
+def record_training_row(client_ip, features):
+    training_rows.append({
+        **{k: features[k] for k in features},
+        '_ip': client_ip,
+        '_ts': time.time(),
+    })
 
 # ==========================================
 # 1. CUSTOM FEATURE EXTRACTION (MUST BE FIRST)
@@ -67,11 +115,23 @@ except Exception as e:
     print(f"⚠️ Error loading Tier 1 core models: {e}")
 
 # Tier 2 Model (Behavioral / Sequence / DDoS Detection)
+TIER2_ATTACK_IDX = 1  # safe default; recomputed from classes_ below
 try:
     tier2_isolation_model = joblib.load('randomforest_logs.pkl')
-    print("[Tier 2] Isolation Forest model loaded successfully.")
+    print("[Tier 2] RandomForest behavioral model loaded successfully.")
+    classes = list(tier2_isolation_model.classes_)
+    if ATTACK_LABEL in classes:
+        TIER2_ATTACK_IDX = classes.index(ATTACK_LABEL)
+    else:
+        # String-labeled model (e.g. ['Attack', 'Benign'] sorted alphabetically)
+        for i, c in enumerate(classes):
+            if str(c).strip().lower() in ('attack', 'anomaly', 'malicious', '1'):
+                TIER2_ATTACK_IDX = i
+                break
+    print(f"[Tier 2] classes_={classes} -> using predict_proba[:, {TIER2_ATTACK_IDX}] "
+          f"as P(Attack) (attack label = {classes[TIER2_ATTACK_IDX]!r})")
 except Exception as e:
-    print(f"⚠️ Error loading Tier 2 isolation model: {e}")
+    print(f"⚠️ Error loading Tier 2 behavioral model: {e}")
 
 # In-memory monitoring states
 traffic_history = {}    
@@ -396,8 +456,12 @@ def behavioural_analysis():
             return jsonify({'error': 'No JSON data provided', 'blocked': False, 'confidence': 0.0, 'type': 'UNKNOWN'}), 400
         
         client_ip = data.get('ip', request.remote_addr)
-        
-        if client_ip in banned_behavior_ips:
+        training = is_training_request(data)
+
+        if training:
+            # Self-heal: never let a stale ban block baseline capture
+            banned_behavior_ips.discard(client_ip)
+        elif client_ip in banned_behavior_ips:
             return jsonify({'blocked': True, 'type': 'AUTOMATED_ANOMALY_DDoS_FUZZ', 'confidence': 1.0}), 200
 
         payload_content = data.get('payload', '')
@@ -431,6 +495,13 @@ def behavioural_analysis():
             }), 200
         # =============================
 
+        # === TRAINING DATASET CAPTURE ===
+        # Snapshot this window as one dataset row. Doing it per-request (instead of
+        # one row per IP at export time) is what actually builds a baseline CSV.
+        if training:
+            record_training_row(client_ip, client_features)
+        # ================================
+
         # === AUTO-ALIGN & DEBUG FIX ===
         if hasattr(tier2_isolation_model, 'feature_names_in_'):
             expected_cols = tier2_isolation_model.feature_names_in_
@@ -447,9 +518,10 @@ def behavioural_analysis():
         try:
             # Supervised Random Forest natively outputs perfect 0.0 to 1.0 probabilities
             probabilities = tier2_isolation_model.predict_proba(features_df)[0]
-            
-            # probabilities[0] is Benign, probabilities[1] is Attack
-            confidence = float(probabilities[1]) 
+
+            # Column order comes from model.classes_ — resolved at load time,
+            # never assumed. TIER2_ATTACK_IDX points at P(Attack).
+            confidence = float(probabilities[TIER2_ATTACK_IDX])
             prediction = 1 if confidence > 0.75 else 0 
 
         
@@ -469,18 +541,24 @@ def behavioural_analysis():
           }), 200
 
         if prediction == 1 and confidence > 0.85:
-            # banned_behavior_ips.add(client_ip)
-             print(f"🚫 [Tier 2 BAN TRIGGERED] IP {client_ip} isolated!")
-            # return jsonify({
-            #     'blocked': True,
-            #     'type': 'AUTOMATED_ANOMALY_DDoS_FUZZ',
-            #     'confidence': round(confidence, 2)
-            # }), 200
+            if training or OBSERVATION_MODE:
+                mode = 'TRAINING' if training else 'OBSERVATION'
+                print(f"[{mode}] Tier 2 would ban IP {client_ip} (conf={confidence:.2f}) — not enforcing.")
+            else:
+                banned_behavior_ips.add(client_ip)
+                print(f"🚫 [Tier 2 BAN TRIGGERED] IP {client_ip} isolated!")
+                return jsonify({
+                    'blocked': True,
+                    'type': 'AUTOMATED_ANOMALY_DDoS_FUZZ',
+                    'confidence': round(confidence, 2)
+                }), 200
 
         return jsonify({
             'blocked': False,
-            'type': 'SAFE',
-            'confidence': round(1 - confidence, 2)
+            'type': 'TRAINING_SAFE' if training else 'SAFE',
+            'confidence': round(1 - confidence, 2),
+            'attack_confidence': round(confidence, 2),
+            'training': training
         }), 200
 
     except Exception as global_err:
@@ -495,7 +573,10 @@ def fallback_analyze():
             return jsonify({'error': 'No JSON body provided', 'blocked': False, 'confidence': 0.0, 'type': 'UNKNOWN'}), 400
         
         client_ip = body_data.get('ip', request.remote_addr)
-        if client_ip in banned_behavior_ips:
+        training = is_training_request(body_data)
+        if training:
+            banned_behavior_ips.discard(client_ip)
+        elif client_ip in banned_behavior_ips:
             return jsonify({'blocked': True, 'type': 'BANNED_IP_BEHAVIORAL', 'confidence': 1.0}), 403
             
         payload = body_data.get('payload', '')
@@ -507,15 +588,23 @@ def fallback_analyze():
         
         request_id = body_data.get('requestId', str(current_time))
         traffic_history.setdefault(client_ip, [])
-        traffic_history[client_ip].append({
-            'id': request_id,
-            'time': current_time,
-            'payload_len': payload_len,
-            'path': body_data.get('path', '/'),
-            'status_code': None,
-            'response_time': None
-        })
-        traffic_history[client_ip] = traffic_history[client_ip][-200:]
+        # DEDUPE FIX: the Node proxy calls /behavioural/analyze AND /analyze for the
+        # same request (same requestId). Appending here again used to double every
+        # event: req_count x2, IAT gaps alternating ~0ms, unique_path_ratio halved.
+        # Only record the event if the dedicated route hasn't already recorded it.
+        already_recorded = any(
+            evt.get('id') == request_id for evt in traffic_history[client_ip][-10:]
+        )
+        if not already_recorded:
+            traffic_history[client_ip].append({
+                'id': request_id,
+                'time': current_time,
+                'payload_len': payload_len,
+                'path': body_data.get('path', '/'),
+                'status_code': None,
+                'response_time': None
+            })
+            traffic_history[client_ip] = traffic_history[client_ip][-200:]
         
         if len(traffic_history[client_ip]) >= 5:
             metrics = calculate_behavioral_features(client_ip)
@@ -524,7 +613,7 @@ def fallback_analyze():
                 features_df = pd.DataFrame([metrics], columns=BEHAVIOR_FEATURES)
                 try:
                     probabilities = tier2_isolation_model.predict_proba(features_df)[0]
-                    tier2_conf = float(probabilities[1])
+                    tier2_conf = float(probabilities[TIER2_ATTACK_IDX])
                     tier2_pred = 1 if tier2_conf > 0.75 else 0
                 except Exception as e:
                     app.logger.error(f"Tier2 execution failed inside fallback: {e}")
@@ -532,8 +621,12 @@ def fallback_analyze():
                     tier2_conf = 0.0
                 
                 if tier2_pred == 1 and tier2_conf > 0.85:
-                    banned_behavior_ips.add(client_ip)
-                    # return jsonify({'blocked': True, 'type': 'AUTOMATED_ANOMALY_DDoS_FUZZ', 'confidence': tier2_conf}), 403
+                    if training or OBSERVATION_MODE:
+                        mode = 'TRAINING' if training else 'OBSERVATION'
+                        print(f"[{mode}] Fallback Tier 2 would ban IP {client_ip} (conf={tier2_conf:.2f}) — not enforcing.")
+                    else:
+                        banned_behavior_ips.add(client_ip)
+                        return jsonify({'blocked': True, 'type': 'AUTOMATED_ANOMALY_DDoS_FUZZ', 'confidence': tier2_conf}), 403
         else:
              print(f"[Fallback Tier 2] IP={client_ip} | Skipped (Cold Start)")
 
@@ -619,18 +712,59 @@ def receive_telemetry():
 
 @app.route('/export_normal', methods=['GET'])
 def export_normal():
+    """Dump every feature window captured in training mode to a CSV.
+
+    ?label=0 (default, benign browsing run) or ?label=1 (attack capture run:
+    replay your fuzzer/DDoS script through the proxy with the training secret,
+    then export with label=1). ?file= overrides the output filename.
+    """
     import csv
+    if not _admin_secret_ok():
+        return jsonify({'error': 'invalid or missing training secret'}), 403
+
+    label = int(request.args.get('label', 0))
+    default_name = 'my_normal_traffic.csv' if label == 0 else 'my_attack_traffic.csv'
+    filename = request.args.get('file', default_name)
+
+    if not training_rows:
+        return ("No captured windows. Enable WAF_TRAINING_MODE=1, browse through the "
+                "proxy with the training secret, then export."), 400
+
     count = 0
-    with open('my_normal_traffic.csv', 'w', newline='') as f:
+    with open(filename, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=BEHAVIOR_FEATURES + ['label'])
         writer.writeheader()
-        for ip, history in traffic_history.items():
-            features = calculate_behavioral_features(ip)
-            if features['req_count'] >= 3:
-                features['label'] = 0 # 0 = Benign (Your Normal Traffic)
-                writer.writerow(features)
-                count += 1
-    return f"✅ Exported {count} normal behavioral windows to my_normal_traffic.csv!"
+        for row in training_rows:
+            out = {k: row[k] for k in BEHAVIOR_FEATURES}
+            out['label'] = label
+            writer.writerow(out)
+            count += 1
+    return f"✅ Exported {count} behavioral windows (label={label}) to {filename}"
+
+
+@app.route('/training/status', methods=['GET'])
+def training_status():
+    if not _admin_secret_ok():
+        return jsonify({'error': 'invalid or missing training secret'}), 403
+    return jsonify({
+        'training_mode': TRAINING_MODE,
+        'observation_mode': OBSERVATION_MODE,
+        'attack_proba_column': TIER2_ATTACK_IDX,
+        'captured_rows': len(training_rows),
+        'tracked_ips': {ip: len(h) for ip, h in traffic_history.items()},
+        'banned_ips': sorted(banned_behavior_ips),
+    })
+
+
+@app.route('/training/reset', methods=['POST'])
+def training_reset():
+    """Clear ALL in-memory state: bans, traffic history, captured rows."""
+    if not _admin_secret_ok():
+        return jsonify({'error': 'invalid or missing training secret'}), 403
+    banned_behavior_ips.clear()
+    traffic_history.clear()
+    training_rows.clear()
+    return jsonify({'status': 'reset', 'banned_ips': 0, 'tracked_ips': 0, 'captured_rows': 0})
 
 
 if __name__ == '__main__':
@@ -638,4 +772,8 @@ if __name__ == '__main__':
     print('[WEJA] AI Engine starting...')
     print(f'[*] Listening on http://0.0.0.0:{port}')
     print('[*] Using hybrid detection: Rule-based + ML (LogisticRegression) + Tier 2 Sequence Behavior')
+    if TRAINING_MODE:
+        print('⚠️  [*] TRAINING MODE IS ON — secret-bearing requests are never banned. Disable for demos.')
+    if OBSERVATION_MODE:
+        print('⚠️  [*] OBSERVATION MODE IS ON — Tier 2 logs but never bans anyone.')
     app.run(host='0.0.0.0', port=port, debug=True)
