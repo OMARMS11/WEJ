@@ -23,6 +23,7 @@ const wafMiddleware = async (req, res, next) => {
 
   const startTime = Date.now();
   const clientIp = req.ip || req.connection.remoteAddress || "unknown";
+  const requestId = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
   // 2. Blacklist Inspection Gate
   if (blacklistService.isBlacklisted(clientIp)) {
@@ -44,7 +45,7 @@ const wafMiddleware = async (req, res, next) => {
         responseTime: Date.now() - startTime,
         geo: req.geoData,
       })
-      .catch(() => {});
+      .catch(() => { });
 
     // Render the Blacklist page with additional details
     return res.status(403).render("blacklist", {
@@ -102,6 +103,7 @@ const wafMiddleware = async (req, res, next) => {
       path: req.path,
       headers: requestData.headers,
       totalPackets: requestData.totalPackets,
+      requestId: requestId
     });
 
     const analysis = response.data;
@@ -176,7 +178,7 @@ const wafMiddleware = async (req, res, next) => {
           responseTime: responseTime,
           geo: req.geoData,
         })
-        .catch(() => {});
+        .catch(() => { });
 
       if (hybridAnalysis.blocked) {
         blacklistService.trackAttack(clientIp, hybridAnalysis.type);
@@ -235,7 +237,7 @@ const wafMiddleware = async (req, res, next) => {
           responseTime: responseTime,
           geo: req.geoData,
         })
-        .catch(() => {});
+        .catch(() => { });
 
       if (fallbackAnalysis.blocked) {
         blacklistService.trackAttack(clientIp, fallbackAnalysis.type);
@@ -258,7 +260,26 @@ const wafMiddleware = async (req, res, next) => {
         "Severe WAF Failure: Both Core and Fallback engines are unreachable.",
         fallbackError.message,
       );
-      // Fail open securely or return 500 depending on project fail-open policies
+
+
+      // === POST-RESPONSE TELEMETRY (The Feedback Loop) ===
+      res.on('finish', () => {
+        const responseTime = Date.now() - startTime;
+        const statusCode = res.statusCode;
+        const responseSize = res.get('Content-Length') || 0;
+
+        // We do NOT await this, so it doesn't slow down the user's connection.
+        aiClient.post('/behavioural/telemetry', {
+          ip: clientIp,
+          requestId: requestId,
+          statusCode: statusCode,
+          responseTime: responseTime,
+          responseSize: responseSize,
+          path: req.path
+        }).catch(err => { });
+      });
+
+
       next();
     }
   }

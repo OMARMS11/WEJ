@@ -2,12 +2,13 @@ import os
 import re
 import sys
 import time
-import pickle
+import math
 import numpy as np
 import pandas as pd
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import joblib
+from collections import Counter
 
 app = Flask(__name__)
 CORS(app)
@@ -95,37 +96,73 @@ ATTACK_LABELS = {
 # 3. NETWORK METRICS FUNCTIONS
 # ==========================================
 
-def calculate_network_metrics(client_ip, passed_total_packets=0):
+def shannon_entropy(string):
+    if not string: return 0.0
+    entropy = 0.0
+    for x in set(string):
+        p_x = float(string.count(x)) / len(string)
+        if p_x > 0:
+            entropy += - p_x * math.log(p_x, 2)
+    return entropy
+
+BEHAVIOR_FEATURES = [
+    'req_count', 'iat_mean', 'iat_std', 'unique_path_ratio',
+    'path_entropy_mean', 'payload_len_mean', 'payload_len_std', 'depth_mean'
+]
+
+def calculate_behavioral_features(client_ip):
     history = traffic_history.get(client_ip, [])
     if not history:
-        return {
-            'Flow Duration': 0.0,
-            'Flow IAT Mean': 0.0,
-            'Flow IAT Min': 0.0,
-            'Fwd Packet Length Mean': 0.0,
-            'Total Fwd Packets': passed_total_packets
-        }
-        
-    timestamps = [item[0] for item in history]
-    lengths = [item[1] for item in history]
+        return {f: 0.0 for f in BEHAVIOR_FEATURES}
     
-    if len(timestamps) > 1:
-        iat_deltas = np.diff(timestamps)
-        iat_mean = float(np.mean(iat_deltas))
-        iat_min = float(np.min(iat_deltas))
-    else:
-        iat_mean = 0.0
-        iat_min = 0.0
-        
-    metrics = {
-        'Flow Duration': float(timestamps[-1] - timestamps[0]) if len(timestamps) > 1 else 0.0,
-        'Flow IAT Mean': iat_mean,
-        'Flow IAT Min': iat_min,
-        'Fwd Packet Length Mean': float(np.mean(lengths)) if lengths else 0.0,
-        'Total Fwd Packets': passed_total_packets if passed_total_packets > 0 else len(timestamps)
+    current_time = time.time()
+    # 10-second rolling window
+    window = [h for h in history if current_time - h['time'] <= 10.0]
+    
+    if not window:
+        return {f: 0.0 for f in BEHAVIOR_FEATURES}
+
+    timestamps = np.array([h['time'] for h in window])
+    lengths = np.array([h['payload_len'] for h in window])
+    paths = [h['path'] for h in window]
+    
+    # telemetry data
+    status_codes = [h['status_code'] for h in window if h['status_code'] is not None]
+    response_times = [h['response_time'] for h in window if h['response_time'] is not None]
+    
+    # 1. Volume
+    req_count = len(window)
+    
+    # 2. Timing (IAT in milliseconds)
+    iat_deltas = np.diff(timestamps) * 1000 
+    iat_mean = float(np.mean(iat_deltas)) if len(iat_deltas) > 0 else 0.0
+    iat_std = float(np.std(iat_deltas)) if len(iat_deltas) > 1 else 0.0
+    
+    # 3. Path Analysis
+    unique_paths = len(set(paths))
+    unique_path_ratio = unique_paths / req_count if req_count > 0 else 0.0
+    
+    path_entropies = [shannon_entropy(p) for p in paths]
+    path_entropy_mean = float(np.mean(path_entropies))
+    
+    path_depths = [p.count('/') for p in paths]
+    depth_mean = float(np.mean(path_depths))
+    
+    # 4. Payload Analysis
+    payload_mean = float(np.mean(lengths))
+    payload_std = float(np.std(lengths)) if len(lengths) > 1 else 0.0
+    
+     # Telemetry Metrics
+    error_rate_4xx = sum(1 for code in status_codes if code >= 400) / len(status_codes) if status_codes else 0.0
+    server_load_mean = float(np.mean(response_times)) if response_times else 0.0
+
+
+    return {
+        'req_count': req_count, 'iat_mean': iat_mean, 'iat_std': iat_std,
+        'unique_path_ratio': unique_path_ratio, 'path_entropy_mean': path_entropy_mean,
+        'payload_len_mean': payload_mean, 'payload_len_std': payload_std, 'depth_mean': depth_mean,
+        'error_rate_4xx': float(error_rate_4xx), 'server_load_mean': server_load_mean
     }
-    return metrics
-   
 
 
 
@@ -146,51 +183,6 @@ def predict_payload_anomaly(request_text):
 # ==========================================
 # 4. SIGNATURE RULES DEFENSE (TIER 1)
 # ==========================================
-
-# SQL_PATTERNS = [
-#     r"(\%27)|(\')|(\-\-)|(\%23)|(#)",
-#     r"((\%3D)|(=))[^\n]*((\%27)|(\')|(\-\-)|(\%3B)|(;))",
-#     r"\w*((\%27)|(\'))((\\\\%6F)|o|(\%4F))((\%72)|r|(\%52))",
-#     r"((\%27)|(\'))union",
-#     r"exec(\s|\+)+(s|x)p\w+",
-#     r"(select|insert|update|delete|drop|truncate|alter)\s",
-#     r"(\%27)|(\')\s*(or|and)\s*\d+\s*=\s*\d+",
-#     r"1\s*=\s*1",
-#     r"\'\s*or\s*\'"
-# ]
-
-# XSS_PATTERNS = [
-#     r"<script[^>]*>.*?</script>",
-#     r"javascript\s*:",
-#     r"on\w+\s*=",
-#     r"<\s*img[^>]+onerror",
-#     r"<\s*svg[^>]+onload",
-#     r"<\s*iframe",
-#     r"<\s*embed",
-#     r"<\s*object",
-#     r"expression\s*\(",
-#     r"alert\s*\(",
-#     r"document\.(cookie|location|write)",
-#     r"eval\s*\("
-# ]
-
-# PATH_TRAVERSAL_PATTERNS = [
-#     r"\.\./",
-#     r"\.\.\\",
-#     r"%2e%2e%2f",
-#     r"%252e%252e%252f",
-#     r"etc/passwd",
-#     r"etc/shadow",
-#     r"windows/system32"
-# ]
-
-# COMMAND_INJECTION_PATTERNS = [
-#     r";\s*(ls|cat|whoami|id|pwd|uname)",
-#     r"\|\s*(ls|cat|whoami|id|pwd|uname)",
-#     r"`[^`]+`",
-#     r"\$\([^)]+\)",
-#     r"&&\s*(ls|cat|whoami|id|pwd|uname)"
-# ]
 
 SQLI_PATTERNS = [
     (r"(\%27)|(\')|(\-\-)|(\%23)|(#)|(\/\*)|(\*\/)|(;--)|(\%3B--)", 20),
@@ -421,14 +413,23 @@ def behavioural_analysis():
 
         payload_content = data.get('payload', '')
         payload_len = len(payload_content) if payload_content is not None else 0
+        path = data.get('path', '')
         current_time = time.time()
         
+        request_id = data.get('requestId', str(current_time))
         traffic_history.setdefault(client_ip, [])
-        traffic_history[client_ip].append((current_time, payload_len))
-        traffic_history[client_ip] = traffic_history[client_ip][-200:]
+        traffic_history[client_ip].append({
+            'id': request_id,
+            'time': current_time,
+            'payload_len': payload_len,
+            'path': data.get('path', '/'),
+            'status_code': None,      # Placeholder for Telemetry
+            'response_time': None     # Placeholder for Telemetry
+        })
+        traffic_history[client_ip] = traffic_history[client_ip][-50:]
         
         passed_total_packets = data.get('totalPackets', 0)
-        client_features = calculate_network_metrics(client_ip, passed_total_packets)
+        client_features = calculate_behavioral_features(client_ip, passed_total_packets)
 
         features_df = pd.DataFrame([client_features], columns=BEHAVIOR_FEATURES)
 
@@ -498,7 +499,7 @@ def fallback_analyze():
         traffic_history[client_ip] = traffic_history[client_ip][-200:]
         
         if len(traffic_history[client_ip]) >= 5:
-            metrics = calculate_network_metrics(client_ip)
+            metrics = calculate_behavioral_features(client_ip)
             features_df = pd.DataFrame([metrics], columns=BEHAVIOR_FEATURES)
             try:
                 tier2_pred = int(tier2_behavior_model.predict(features_df)[0])
@@ -569,6 +570,28 @@ def fallback_analyze():
         app.logger.error(f"Analysis error: {str(e)}")
         return jsonify({'error': str(e), 'blocked': False, 'confidence': 0.0, 'type': 'ERROR'}), 500
 
+@app.route('/behavioural/telemetry', methods=['POST'])
+def receive_telemetry():
+    try:
+        data = request.get_json()
+        client_ip = data.get('ip')
+        request_id = data.get('requestId')
+        status_code = data.get('statusCode', 200)
+        response_time = data.get('responseTime', 0)
+        
+        if client_ip in traffic_history:
+            # Iterate backwards (most recent first) to find the matching request ID
+            for req_event in reversed(traffic_history[client_ip]):
+                if req_event.get('id') == request_id:
+                    # INJECT THE GROUND TRUTH
+                    req_event['status_code'] = status_code
+                    req_event['response_time'] = response_time
+                    break # Found it, stop searching
+                    
+        return jsonify({'status': 'telemetry_received'}), 200
+    except Exception as e:
+        app.logger.error(f"Telemetry ingestion error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('AI_ENGINE_PORT', os.environ.get('PORT', '5000')))
