@@ -25,6 +25,22 @@ const wafMiddleware = async (req, res, next) => {
   const clientIp = req.ip || req.connection.remoteAddress || "unknown";
   const requestId = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
+  // === POST-RESPONSE TELEMETRY (The Feedback Loop) ===
+  res.on('finish', () => {
+    const responseTime = Date.now() - startTime;
+    const statusCode = res.statusCode;
+    const responseSize = res.get('Content-Length') || 0;
+
+    aiClient.post('/behavioural/telemetry', {
+      ip: clientIp,
+      requestId: requestId,
+      statusCode: statusCode,
+      responseTime: responseTime,
+      responseSize: responseSize,
+      path: req.path
+    }).catch(err => { });
+  });
+
   // 2. Blacklist Inspection Gate
   if (blacklistService.isBlacklisted(clientIp)) {
     const entry = blacklistService.ipBlacklist.get(clientIp);
@@ -108,27 +124,6 @@ const wafMiddleware = async (req, res, next) => {
 
     const analysis = response.data;
     const responseTime = Date.now() - startTime;
-
-    // Log the structural evaluation to database records
-    // logService
-    //   .saveLog({
-    //     method: req.method,
-    //     path: req.path,
-    //     query: req.query,
-    //     body: req.body,
-    //     headers: requestData.headers,
-    //     sourceIp: clientIp,
-    //     userAgent: req.headers["user-agent"] || "",
-    //     blocked: analysis.blocked,
-    //     attackType: analysis.type,
-    //     confidence: analysis.confidence,
-    //     rule_confidence: analysis.rule_confidence,
-    //     ml_confidence: analysis.ml_confidence,
-    //     decision: analysis.decision,
-    //     responseTime: responseTime,
-    //     geo: req.geoData,
-    //   })
-    //   .catch(() => {});
 
     // Handle Behavioral Drop Trigger
     if (analysis.blocked) {
@@ -260,25 +255,6 @@ const wafMiddleware = async (req, res, next) => {
         "Severe WAF Failure: Both Core and Fallback engines are unreachable.",
         fallbackError.message,
       );
-
-
-      // === POST-RESPONSE TELEMETRY (The Feedback Loop) ===
-      res.on('finish', () => {
-        const responseTime = Date.now() - startTime;
-        const statusCode = res.statusCode;
-        const responseSize = res.get('Content-Length') || 0;
-
-        // We do NOT await this, so it doesn't slow down the user's connection.
-        aiClient.post('/behavioural/telemetry', {
-          ip: clientIp,
-          requestId: requestId,
-          statusCode: statusCode,
-          responseTime: responseTime,
-          responseSize: responseSize,
-          path: req.path
-        }).catch(err => { });
-      });
-
 
       next();
     }

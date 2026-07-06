@@ -429,7 +429,7 @@ def behavioural_analysis():
         traffic_history[client_ip] = traffic_history[client_ip][-50:]
         
         passed_total_packets = data.get('totalPackets', 0)
-        client_features = calculate_behavioral_features(client_ip, passed_total_packets)
+        client_features = calculate_behavioral_features(client_ip)
 
         features_df = pd.DataFrame([client_features], columns=BEHAVIOR_FEATURES)
 
@@ -438,9 +438,12 @@ def behavioural_analysis():
         print(f"{features_df.to_string(index=False)}\n")
 
         try:
-            prediction_id = int(tier2_behavior_model.predict(features_df)[0])
-            confidence = float(tier2_behavior_model.predict_proba(features_df)[0][prediction_id])
-            prediction = 1 if prediction_id > 0 else 0
+            # Isolation Forest returns 1 (Normal) or -1 (Anomaly)
+            prediction_raw = int(tier2_behavior_model.predict(features_df)[0])
+            raw_score = tier2_behavior_model.score_samples(features_df)[0]
+            # Sigmoid function to map the score to a 0.0 - 1.0 percentage
+            confidence = float(1 / (1 + np.exp(raw_score))) 
+            prediction = 1 if prediction_raw == -1 else 0 
 
         
         except Exception as model_err:
@@ -450,7 +453,7 @@ def behavioural_analysis():
             confidence = 0.0
 
         print(f"[Tier 2 Dedicated] IP={client_ip} | Window={len(traffic_history[client_ip])} | Pred={prediction} | Anomaly_Conf={confidence:.4f}")
-        print(f"[FEATURES MATRIX] Duration: {client_features['Flow Duration']:.4f} | Total Packets: {client_features['Total Fwd Packets']}")
+        print(f"[FEATURES MATRIX] Req_Count: {client_features['req_count']} | IAT_Mean: {client_features['iat_mean']:.2f} | Path_Entropy: {client_features['path_entropy_mean']:.2f}")
 
         if client_ip in banned_behavior_ips:
             return jsonify({
@@ -494,8 +497,16 @@ def fallback_analyze():
         current_time = time.time()
         payload_len = len(payload) if payload is not None else 0
         
+        request_id = body_data.get('requestId', str(current_time))
         traffic_history.setdefault(client_ip, [])
-        traffic_history[client_ip].append((current_time, payload_len))
+        traffic_history[client_ip].append({
+            'id': request_id,
+            'time': current_time,
+            'payload_len': payload_len,
+            'path': body_data.get('path', '/'),
+            'status_code': None,
+            'response_time': None
+        })
         traffic_history[client_ip] = traffic_history[client_ip][-200:]
         
         if len(traffic_history[client_ip]) >= 5:
