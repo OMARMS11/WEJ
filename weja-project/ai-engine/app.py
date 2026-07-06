@@ -68,21 +68,19 @@ except Exception as e:
 
 # Tier 2 Model (Behavioral / Sequence / DDoS Detection)
 try:
-    tier2_behavior_model = joblib.load('tier2_behavior_model2.pkl')
-    print("[Tier 2] Behavioral Sequence model loaded successfully.")
+    tier2_isolation_model = joblib.load('tier2_isolation.pkl')
+    print("[Tier 2] Isolation Forest model loaded successfully.")
 except Exception as e:
-    print(f"⚠️ Error loading Tier 2 behavior model: {e}")
+    print(f"⚠️ Error loading Tier 2 isolation model: {e}")
 
 # In-memory monitoring states
 traffic_history = {}    
 banned_behavior_ips = set()  
 
 BEHAVIOR_FEATURES = [
-    'Flow Duration', 
-    'Flow IAT Mean', 
-    'Flow IAT Min', 
-    'Fwd Packet Length Mean', 
-    'Total Fwd Packets'
+    'req_count', 'iat_mean', 'iat_std', 'unique_path_ratio',
+    'path_entropy_mean', 'payload_len_mean', 'payload_len_std', 'depth_mean',
+    'error_rate_4xx'
 ]
 
 ATTACK_LABELS = {
@@ -104,11 +102,6 @@ def shannon_entropy(string):
         if p_x > 0:
             entropy += - p_x * math.log(p_x, 2)
     return entropy
-
-BEHAVIOR_FEATURES = [
-    'req_count', 'iat_mean', 'iat_std', 'unique_path_ratio',
-    'path_entropy_mean', 'payload_len_mean', 'payload_len_std', 'depth_mean'
-]
 
 def calculate_behavioral_features(client_ip):
     history = traffic_history.get(client_ip, [])
@@ -154,14 +147,14 @@ def calculate_behavioral_features(client_ip):
     
      # Telemetry Metrics
     error_rate_4xx = sum(1 for code in status_codes if code >= 400) / len(status_codes) if status_codes else 0.0
-    server_load_mean = float(np.mean(response_times)) if response_times else 0.0
+    
 
 
     return {
         'req_count': req_count, 'iat_mean': iat_mean, 'iat_std': iat_std,
         'unique_path_ratio': unique_path_ratio, 'path_entropy_mean': path_entropy_mean,
         'payload_len_mean': payload_mean, 'payload_len_std': payload_std, 'depth_mean': depth_mean,
-        'error_rate_4xx': float(error_rate_4xx), 'server_load_mean': server_load_mean
+        'error_rate_4xx': float(error_rate_4xx)
     }
 
 
