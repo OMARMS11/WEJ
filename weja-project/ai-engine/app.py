@@ -68,7 +68,7 @@ except Exception as e:
 
 # Tier 2 Model (Behavioral / Sequence / DDoS Detection)
 try:
-    tier2_isolation_model = joblib.load('tier2_isolation.pkl')
+    tier2_isolation_model = joblib.load('randomforest_logs.pkl')
     print("[Tier 2] Isolation Forest model loaded successfully.")
 except Exception as e:
     print(f"⚠️ Error loading Tier 2 isolation model: {e}")
@@ -79,16 +79,9 @@ banned_behavior_ips = set()
 
 BEHAVIOR_FEATURES = [
     'req_count', 'iat_mean', 'iat_std', 'unique_path_ratio',
-    'path_entropy_mean', 'payload_len_mean', 'payload_len_std', 'depth_mean',
+    'path_entropy_mean', 'depth_mean', 'payload_len_mean', 'payload_len_std', 
     'error_rate_4xx'
 ]
-
-ATTACK_LABELS = {
-    0: "BENIGN",
-    1: "WEB_FUZZING_DETECTED",
-    2: "DDOS_FLOOD_DETECTED",
-    3: "PORT_SCAN_DETECTED"
-}
 
 # ==========================================
 # 3. NETWORK METRICS FUNCTIONS
@@ -142,8 +135,9 @@ def calculate_behavioral_features(client_ip):
     depth_mean = float(np.mean(path_depths))
     
     # 4. Payload Analysis
-    payload_mean = float(np.mean(lengths))
-    payload_std = float(np.std(lengths)) if len(lengths) > 1 else 0.0
+    path_lengths = np.array([len(p) for p in paths])
+    payload_mean = float(np.mean(path_lengths))
+    payload_std = float(np.std(path_lengths)) if len(path_lengths) > 1 else 0.0
     
      # Telemetry Metrics
     error_rate_4xx = sum(1 for code in status_codes if code >= 400) / len(status_codes) if status_codes else 0.0
@@ -151,13 +145,16 @@ def calculate_behavioral_features(client_ip):
 
 
     return {
-        'req_count': req_count, 'iat_mean': iat_mean, 'iat_std': iat_std,
-        'unique_path_ratio': unique_path_ratio, 'path_entropy_mean': path_entropy_mean,
-        'payload_len_mean': payload_mean, 'payload_len_std': payload_std, 'depth_mean': depth_mean,
+        'req_count': req_count, 
+        'iat_mean': iat_mean, 
+        'iat_std': iat_std,
+        'unique_path_ratio': unique_path_ratio, 
+        'path_entropy_mean': path_entropy_mean,
+        'depth_mean': depth_mean,
+        'payload_len_mean': payload_mean, 
+        'payload_len_std': payload_std, 
         'error_rate_4xx': float(error_rate_4xx)
     }
-
-
 
 
 def predict_payload_anomaly(request_text):
@@ -361,9 +358,9 @@ def detect_attack_type(payload: str, behavioral_result=None) -> dict:
         final_conf = round(ml_conf, 2)
         decision = 'ML_ONLY'
 
-    if final_conf <= 0.05 and  final_type == 'SAFE':
-        blocked = True
-        decision = 'LOW_CONF_SAFE'
+    # if final_conf <= 0.05 and  final_type == 'SAFE':
+    #     blocked = True
+    #     decision = 'LOW_CONF_SAFE'
 
     return {
         'blocked': blocked,
@@ -391,7 +388,6 @@ def health_check():
         'detection': 'Hybrid (Rule-based + ML)'
     })
 
-
 @app.route('/behavioural/analyze', methods=['POST'])
 def behavioural_analysis():
     try:
@@ -405,8 +401,9 @@ def behavioural_analysis():
             return jsonify({'blocked': True, 'type': 'AUTOMATED_ANOMALY_DDoS_FUZZ', 'confidence': 1.0}), 200
 
         payload_content = data.get('payload', '')
-        payload_len = len(payload_content) if payload_content is not None else 0
-        path = data.get('path', '')
+        path = data.get('path', '/')
+        # FIX: Use path length to perfectly match the training script's len(url)
+        payload_len = len(path)
         current_time = time.time()
         
         request_id = data.get('requestId', str(current_time))
@@ -448,18 +445,17 @@ def behavioural_analysis():
         print(f"{features_df.to_string(index=False)}\n")
 
         try:
-            # Isolation Forest returns 1 (Normal) or -1 (Anomaly)
-            prediction_raw = int(tier2_isolation_model.predict(features_df)[0])
-            raw_score = tier2_isolation_model.score_samples(features_df)[0]
-            # Sigmoid function to map the score to a 0.0 - 1.0 percentage
-            confidence = float(1 / (1 + np.exp(raw_score))) 
-            prediction = 1 if prediction_raw == -1 else 0 
+            # Supervised Random Forest natively outputs perfect 0.0 to 1.0 probabilities
+            probabilities = tier2_isolation_model.predict_proba(features_df)[0]
+            
+            # probabilities[0] is Benign, probabilities[1] is Attack
+            confidence = float(probabilities[1]) 
+            prediction = 1 if confidence > 0.75 else 0 
 
         
         except Exception as model_err:
             app.logger.error(f"Inference error: {model_err}")
             prediction = 0
-
             confidence = 0.0
 
         print(f"[Tier 2 Dedicated] IP={client_ip} | Window={len(traffic_history[client_ip])} | Pred={prediction} | Anomaly_Conf={confidence:.4f}")
@@ -472,14 +468,14 @@ def behavioural_analysis():
               'confidence': 1.0
           }), 200
 
-        if prediction == 1 and confidence > 0.6:
-            banned_behavior_ips.add(client_ip)
-            print(f"🚫 [Tier 2 BAN TRIGGERED] IP {client_ip} isolated!")
-            return jsonify({
-                'blocked': True,
-                'type': 'AUTOMATED_ANOMALY_DDoS_FUZZ',
-                'confidence': round(confidence, 2)
-            }), 200
+        if prediction == 1 and confidence > 0.85:
+            # banned_behavior_ips.add(client_ip)
+             print(f"🚫 [Tier 2 BAN TRIGGERED] IP {client_ip} isolated!")
+            # return jsonify({
+            #     'blocked': True,
+            #     'type': 'AUTOMATED_ANOMALY_DDoS_FUZZ',
+            #     'confidence': round(confidence, 2)
+            # }), 200
 
         return jsonify({
             'blocked': False,
@@ -490,7 +486,6 @@ def behavioural_analysis():
     except Exception as global_err:
         app.logger.error(f"Dedicated Tier 2 route failed: {str(global_err)}")
         return jsonify({'error': str(global_err), 'blocked': False, 'confidence': 0.0, 'type': 'ERROR'}), 500
-
 
 @app.route('/analyze', methods=['POST'])
 def fallback_analyze():
@@ -505,7 +500,10 @@ def fallback_analyze():
             
         payload = body_data.get('payload', '')
         current_time = time.time()
-        payload_len = len(payload) if payload is not None else 0
+        
+        path = body_data.get('path', '/')
+        # FIX: Use path length to perfectly match the training script's len(url)
+        payload_len = len(path)
         
         request_id = body_data.get('requestId', str(current_time))
         traffic_history.setdefault(client_ip, [])
@@ -521,21 +519,24 @@ def fallback_analyze():
         
         if len(traffic_history[client_ip]) >= 5:
             metrics = calculate_behavioral_features(client_ip)
-            features_df = pd.DataFrame([metrics], columns=BEHAVIOR_FEATURES)
-            try:
-             tier2_pred_raw = int(tier2_isolation_model.predict(features_df)[0])
-             raw_score = tier2_isolation_model.score_samples(features_df)[0]
-             tier2_conf = float(1 / (1 + np.exp(raw_score)))
-             tier2_pred = 1 if tier2_pred_raw == -1 else 0
-            except Exception as e:
-                app.logger.error(f"Tier2 execution failed inside fallback: {e}")
-                tier2_pred = 0
-                tier2_conf = 0.0
+
+            if metrics['req_count'] >= 3:
+                features_df = pd.DataFrame([metrics], columns=BEHAVIOR_FEATURES)
+                try:
+                    probabilities = tier2_isolation_model.predict_proba(features_df)[0]
+                    tier2_conf = float(probabilities[1])
+                    tier2_pred = 1 if tier2_conf > 0.75 else 0
+                except Exception as e:
+                    app.logger.error(f"Tier2 execution failed inside fallback: {e}")
+                    tier2_pred = 0
+                    tier2_conf = 0.0
                 
-            if tier2_pred == 1 and tier2_conf > 0.9:
-                banned_behavior_ips.add(client_ip)
-                return jsonify({'blocked': True, 'type': 'AUTOMATED_ANOMALY_DDoS_FUZZ', 'confidence': tier2_conf}), 403
-                
+                if tier2_pred == 1 and tier2_conf > 0.85:
+                    banned_behavior_ips.add(client_ip)
+                    # return jsonify({'blocked': True, 'type': 'AUTOMATED_ANOMALY_DDoS_FUZZ', 'confidence': tier2_conf}), 403
+        else:
+             print(f"[Fallback Tier 2] IP={client_ip} | Skipped (Cold Start)")
+
         req_path = body_data.get('path', '')
         req_method = body_data.get('method', 'GET')
         combined_string = f"{payload} {req_path}"
@@ -615,6 +616,22 @@ def receive_telemetry():
     except Exception as e:
         app.logger.error(f"Telemetry ingestion error: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/export_normal', methods=['GET'])
+def export_normal():
+    import csv
+    count = 0
+    with open('my_normal_traffic.csv', 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=BEHAVIOR_FEATURES + ['label'])
+        writer.writeheader()
+        for ip, history in traffic_history.items():
+            features = calculate_behavioral_features(ip)
+            if features['req_count'] >= 3:
+                features['label'] = 0 # 0 = Benign (Your Normal Traffic)
+                writer.writerow(features)
+                count += 1
+    return f"✅ Exported {count} normal behavioral windows to my_normal_traffic.csv!"
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('AI_ENGINE_PORT', os.environ.get('PORT', '5000')))
