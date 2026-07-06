@@ -151,6 +151,7 @@ const wafMiddleware = async (req, res, next) => {
         headers: requestData.headers,
         totalPackets: requestData.totalPackets,
         behavioral_result: analysis,
+        requestId: requestId
       });
 
       const hybridAnalysis = hybridResponse.data;
@@ -212,6 +213,7 @@ const wafMiddleware = async (req, res, next) => {
         path: req.path,
         headers: requestData.headers,
         totalPackets: requestData.totalPackets,
+        requestId: requestId
       });
 
       const fallbackAnalysis = fallbackResponse.data;

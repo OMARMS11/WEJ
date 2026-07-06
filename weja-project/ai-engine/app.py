@@ -432,8 +432,8 @@ def behavioural_analysis():
 
         try:
             # Isolation Forest returns 1 (Normal) or -1 (Anomaly)
-            prediction_raw = int(tier2_behavior_model.predict(features_df)[0])
-            raw_score = tier2_behavior_model.score_samples(features_df)[0]
+            prediction_raw = int(tier2_isolation_model.predict(features_df)[0])
+            raw_score = tier2_isolation_model.score_samples(features_df)[0]
             # Sigmoid function to map the score to a 0.0 - 1.0 percentage
             confidence = float(1 / (1 + np.exp(raw_score))) 
             prediction = 1 if prediction_raw == -1 else 0 
@@ -506,8 +506,10 @@ def fallback_analyze():
             metrics = calculate_behavioral_features(client_ip)
             features_df = pd.DataFrame([metrics], columns=BEHAVIOR_FEATURES)
             try:
-                tier2_pred = int(tier2_behavior_model.predict(features_df)[0])
-                tier2_conf = float(tier2_behavior_model.predict_proba(features_df)[0][1])
+             tier2_pred_raw = int(tier2_isolation_model.predict(features_df)[0])
+             raw_score = tier2_isolation_model.score_samples(features_df)[0]
+             tier2_conf = float(1 / (1 + np.exp(raw_score)))
+             tier2_pred = 1 if tier2_pred_raw == -1 else 0
             except Exception as e:
                 app.logger.error(f"Tier2 execution failed inside fallback: {e}")
                 tier2_pred = 0
