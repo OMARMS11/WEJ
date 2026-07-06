@@ -423,8 +423,25 @@ def behavioural_analysis():
         
         passed_total_packets = data.get('totalPackets', 0)
         client_features = calculate_behavioral_features(client_ip)
+     
+        # === COLD START PROTECTION ===
+        if client_features['req_count'] < 3:
+            print(f"[Tier 2] IP={client_ip} | Window={client_features['req_count']} | Skipped (Cold Start)")
+            return jsonify({
+                'blocked': False,
+                'type': 'SAFE',
+                'confidence': 0.0
+            }), 200
+        # =============================
 
-        features_df = pd.DataFrame([client_features], columns=BEHAVIOR_FEATURES)
+        # === AUTO-ALIGN & DEBUG FIX ===
+        if hasattr(tier2_isolation_model, 'feature_names_in_'):
+            expected_cols = tier2_isolation_model.feature_names_in_
+            # Force the dataframe to match the model's exact columns and order
+            features_df = pd.DataFrame([client_features])[expected_cols]
+        else:
+            features_df = pd.DataFrame([client_features], columns=BEHAVIOR_FEATURES)
+        # ==============================
 
         #debug print
         print(f"\n[ML INPUT MATRIX] Total Packets received from Node: {passed_total_packets}")
