@@ -360,7 +360,7 @@ def detect_attack_type(payload: str, behavioral_result=None) -> dict:
             final_type = rule_type
             final_conf = round(0.4 * rule_conf + 0.6 * ml_conf, 2)
             decision = 'FUSION'
-        elif ml_label != 'safe' and ml_conf >= 0.9:
+        elif ml_label != 'safe' and ml_conf >= 0.75:
             blocked = True
             final_type = ml_label
             final_conf = round(ml_conf, 2)
@@ -375,10 +375,13 @@ def detect_attack_type(payload: str, behavioral_result=None) -> dict:
         final_type = ml_label
         final_conf = round(ml_conf, 2)
         decision = 'ML_ONLY'
-
-    if final_conf <= 0.05 and  final_type == 'SAFE':
+    
+    if ml_label == 'safe' and ml_conf <= 0.05 :
         blocked = True
-        decision = 'LOW_CONF_SAFE'
+        final_type = 'low safe confidence'
+        final_conf = round(ml_conf, 2)
+        decision = 'malicious payload suspected'
+
 
     return {
         'blocked': blocked,
