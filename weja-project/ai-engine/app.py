@@ -402,7 +402,7 @@ def detect_attack_type(payload: str, behavioral_result=None) -> dict:
             final_type = rule_type
             final_conf = round(0.4 * rule_conf + 0.6 * ml_conf, 2)
             decision = 'FUSION'
-        elif ml_label != 'safe' and ml_conf >= 0.9:
+        elif ml_label != 'safe' and ml_conf >= 0.75:
             blocked = True
             final_type = ml_label
             final_conf = round(ml_conf, 2)

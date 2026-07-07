@@ -301,13 +301,14 @@ const wafMiddleware = async (req, res, next) => {
         console.log(
           `🚫 Fallback WAF BLOCK: ${req.method} ${req.path} -> Motive: ${fallbackAnalysis.type}`,
         );
-        return res.status(403).render("blocked", {
+        return res.status(403).render("behavioral_blocked", {
           error: "Request Blocked",
           reason:
             "Potential signature payload threat flagged by backup engine.",
           attackType: fallbackAnalysis.type,
           confidence: fallbackAnalysis.confidence,
           decision: fallbackAnalysis.decision,
+          requestId: Date.now().toString(),
         });
       }
 
