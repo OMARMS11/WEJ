@@ -1,9 +1,40 @@
+const crypto = require("crypto");
 const CONFIG = require("../config");
 const aiClient = require("../services/aiClient");
 const behaviouralModel = require("../services/behaviouralModel");
 const blacklistService = require("../services/blacklist");
 const logService = require("../database/logService");
 const ipRequestCounters = {}; // Track precise packet counts
+
+// ==========================================
+// TRAINING MODE (dataset capture / bypass)
+// ==========================================
+// Enable with:  WAF_TRAINING_MODE=1 WAF_TRAINING_SECRET=<secret> node server.js
+// A request is "training" if it carries header  x-waf-training: <secret>
+// (use a browser extension like ModHeader), OR its IP is in WAF_TRAINING_IPS
+// (comma-separated, e.g. "127.0.0.1,::1,::ffff:127.0.0.1" for natural browsing
+// with no extension). Training requests are never blocked or blacklisted, but
+// they still flow through the AI engine so traffic_history keeps building.
+// The whole gate is inert unless BOTH env vars are set — remove them for demos.
+const TRAINING_MODE = process.env.WAF_TRAINING_MODE === "1";
+const TRAINING_SECRET = process.env.WAF_TRAINING_SECRET || "";
+const TRAINING_IPS = (process.env.WAF_TRAINING_IPS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+}
+
+function isTrainingRequest(req, clientIp) {
+  if (!TRAINING_MODE || !TRAINING_SECRET) return false;
+  if (TRAINING_IPS.includes(clientIp)) return true;
+  const header = req.headers["x-waf-training"];
+  return Boolean(header && safeEqual(header, TRAINING_SECRET));
+}
 
 const wafMiddleware = async (req, res, next) => {
   // 1. Static Assets Opt-out (Keep this to protect asset performance)
@@ -23,9 +54,34 @@ const wafMiddleware = async (req, res, next) => {
 
   const startTime = Date.now();
   const clientIp = req.ip || req.connection.remoteAddress || "unknown";
+  const requestId = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+  // === POST-RESPONSE TELEMETRY (The Feedback Loop) ===
+  res.on('finish', () => {
+    const responseTime = Date.now() - startTime;
+    const statusCode = res.statusCode;
+    const responseSize = res.get('Content-Length') || 0;
+
+    aiClient.post('/behavioural/telemetry', {
+      ip: clientIp,
+      requestId: requestId,
+      statusCode: statusCode,
+      responseTime: responseTime,
+      responseSize: responseSize,
+      path: req.path
+    }).catch(err => { });
+  });
+
+  const training = isTrainingRequest(req, clientIp);
 
   // 2. Blacklist Inspection Gate
-  if (blacklistService.isBlacklisted(clientIp)) {
+  if (training && blacklistService.isBlacklisted(clientIp)) {
+    // Self-heal: a stale edge ban must not trap the training IP.
+    // (blacklistService.ipBlacklist is the Map already used above in this file.)
+    blacklistService.ipBlacklist.delete(clientIp);
+    console.log(`🎓 [TRAINING] Cleared edge blacklist entry for ${clientIp}`);
+  }
+  if (!training && blacklistService.isBlacklisted(clientIp)) {
     const entry = blacklistService.ipBlacklist.get(clientIp);
     console.log(`🚫 BLOCK (BLACKLISTED IP): ${clientIp} - ${entry.reason}`);
 
@@ -44,7 +100,7 @@ const wafMiddleware = async (req, res, next) => {
         responseTime: Date.now() - startTime,
         geo: req.geoData,
       })
-      .catch(() => {});
+      .catch(() => { });
 
     // Render the Blacklist page with additional details
     return res.status(403).render("blacklist", {
@@ -102,34 +158,21 @@ const wafMiddleware = async (req, res, next) => {
       path: req.path,
       headers: requestData.headers,
       totalPackets: requestData.totalPackets,
+      requestId: requestId,
+      trainingMode: training,
+      trainingSecret: training ? TRAINING_SECRET : undefined
     });
 
     const analysis = response.data;
     const responseTime = Date.now() - startTime;
 
-    // Log the structural evaluation to database records
-    // logService
-    //   .saveLog({
-    //     method: req.method,
-    //     path: req.path,
-    //     query: req.query,
-    //     body: req.body,
-    //     headers: requestData.headers,
-    //     sourceIp: clientIp,
-    //     userAgent: req.headers["user-agent"] || "",
-    //     blocked: analysis.blocked,
-    //     attackType: analysis.type,
-    //     confidence: analysis.confidence,
-    //     rule_confidence: analysis.rule_confidence,
-    //     ml_confidence: analysis.ml_confidence,
-    //     decision: analysis.decision,
-    //     responseTime: responseTime,
-    //     geo: req.geoData,
-    //   })
-    //   .catch(() => {});
-
     // Handle Behavioral Drop Trigger
-    if (analysis.blocked) {
+    if (analysis.blocked && training) {
+      console.log(
+        `🎓 [TRAINING] Behavioral verdict would block ${clientIp} (${analysis.type}, conf ${analysis.confidence}) — not enforcing.`,
+      );
+    }
+    if (analysis.blocked && !training) {
       blacklistService.trackAttack(clientIp, analysis.type);
       console.log(
         `🚫 WAF BLOCK: ${req.method} ${req.path} -> Motive: ${analysis.type} (Conf: ${analysis.confidence})`,
@@ -154,6 +197,9 @@ const wafMiddleware = async (req, res, next) => {
         headers: requestData.headers,
         totalPackets: requestData.totalPackets,
         behavioral_result: analysis,
+        requestId: requestId,
+        trainingMode: training,
+        trainingSecret: training ? TRAINING_SECRET : undefined
       });
 
       const hybridAnalysis = hybridResponse.data;
@@ -176,9 +222,14 @@ const wafMiddleware = async (req, res, next) => {
           responseTime: responseTime,
           geo: req.geoData,
         })
-        .catch(() => {});
+        .catch(() => { });
 
-      if (hybridAnalysis.blocked) {
+      if (hybridAnalysis.blocked && training) {
+        console.log(
+          `🎓 [TRAINING] Hybrid verdict would block ${clientIp} (${hybridAnalysis.type}) — not enforcing.`,
+        );
+      }
+      if (hybridAnalysis.blocked && !training) {
         blacklistService.trackAttack(clientIp, hybridAnalysis.type);
         console.log(
           `🚫 Hybrid WAF BLOCK: ${req.method} ${req.path} -> Motive: ${hybridAnalysis.type} (Conf: ${hybridAnalysis.confidence})`,
@@ -215,6 +266,9 @@ const wafMiddleware = async (req, res, next) => {
         path: req.path,
         headers: requestData.headers,
         totalPackets: requestData.totalPackets,
+        requestId: requestId,
+        trainingMode: training,
+        trainingSecret: training ? TRAINING_SECRET : undefined
       });
 
       const fallbackAnalysis = fallbackResponse.data;
@@ -235,9 +289,14 @@ const wafMiddleware = async (req, res, next) => {
           responseTime: responseTime,
           geo: req.geoData,
         })
-        .catch(() => {});
+        .catch(() => { });
 
-      if (fallbackAnalysis.blocked) {
+      if (fallbackAnalysis.blocked && training) {
+        console.log(
+          `🎓 [TRAINING] Fallback verdict would block ${clientIp} (${fallbackAnalysis.type}) — not enforcing.`,
+        );
+      }
+      if (fallbackAnalysis.blocked && !training) {
         blacklistService.trackAttack(clientIp, fallbackAnalysis.type);
         console.log(
           `🚫 Fallback WAF BLOCK: ${req.method} ${req.path} -> Motive: ${fallbackAnalysis.type}`,
@@ -259,7 +318,7 @@ const wafMiddleware = async (req, res, next) => {
         "Severe WAF Failure: Both Core and Fallback engines are unreachable.",
         fallbackError.message,
       );
-      // Fail open securely or return 500 depending on project fail-open policies
+
       next();
     }
   }

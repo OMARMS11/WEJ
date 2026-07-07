@@ -1,55 +1,63 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <title>Access Blocked</title>
-    <style>
-      body {
-        font-family: Arial;
-        background: #f4f4f4;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 100vh;
-      }
 
-      .card {
-        background: white;
-        padding: 40px;
-        border-radius: 10px;
-        box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
-        text-align: center;
-        max-width: 500px;
-      }
+<head>
+  <title>Access Blocked</title>
+  <style>
+    body {
+      font-family: Arial;
+      background: #f4f4f4;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
 
-      h1 {
-        color: #d32f2f;
-      }
+    .card {
+      background: white;
+      padding: 40px;
+      border-radius: 10px;
+      box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+      text-align: center;
+      max-width: 500px;
+    }
 
-      .details {
-        margin-top: 20px;
-        color: #555;
-      }
+    h1 {
+      color: #d32f2f;
+    }
 
-      code {
-        background: #eee;
-        padding: 4px 8px;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <h1>🚫 Request Blocked</h1>
+    .details {
+      margin-top: 20px;
+      color: #555;
+    }
 
-      <p><strong>Reason:</strong> <%= reason %></p>
+    code {
+      background: #eee;
+      padding: 4px 8px;
+    }
+  </style>
+</head>
 
-      <div class="details">
-        <p><strong>Attack Type:</strong> <%= attackType %></p>
-        <p>
-          <strong>Confidence:</strong> <%= (confidence * 100).toFixed(2) %>%
-        </p>
-        <p><strong>Decision:</strong> <%= decision %></p>
-        <p><strong>Request ID:</strong> <code><%= requestId %></code></p>
-      </div>
+<body>
+  <div class="card">
+    <h1>🚫 Request Blocked</h1>
+
+    <p><strong>Reason:</strong>
+      <%= reason %>
+    </p>
+
+    <div class="details">
+      <p><strong>Attack Type:</strong>
+        <%= attackType %>
+      </p>
+      <p>
+        <strong>Confidence:</strong>
+        <%= (confidence * 100).toFixed(2) %>%
+      </p>
+
+      <p><strong>Request ID:</strong> <code><%= requestId %></code></p>
     </div>
-  </body>
+  </div>
+</body>
+
 </html>

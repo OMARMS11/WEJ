@@ -1,0 +1,27 @@
+{
+  "features": [
+    "req_count",
+    "iat_mean",
+    "iat_std",
+    "unique_path_ratio",
+    "path_entropy_mean",
+    "depth_mean",
+    "payload_len_mean",
+    "payload_len_std",
+    "error_rate_4xx"
+  ],
+  "attack_label": 1,
+  "attack_proba_column": 1,
+  "classes_": [
+    0,
+    1
+  ],
+  "sklearn_version": "1.9.0",
+  "train_rows": 122,
+  "test_rows": 31,
+  "sources": [
+    "my_normal_traffic.csv",
+    "my_attack_traffic.csv"
+  ],
+  "calibrated": false
+}
