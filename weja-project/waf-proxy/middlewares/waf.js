@@ -57,19 +57,21 @@ const wafMiddleware = async (req, res, next) => {
   const requestId = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
   // === POST-RESPONSE TELEMETRY (The Feedback Loop) ===
-  res.on('finish', () => {
+  res.on("finish", () => {
     const responseTime = Date.now() - startTime;
     const statusCode = res.statusCode;
-    const responseSize = res.get('Content-Length') || 0;
+    const responseSize = res.get("Content-Length") || 0;
 
-    aiClient.post('/behavioural/telemetry', {
-      ip: clientIp,
-      requestId: requestId,
-      statusCode: statusCode,
-      responseTime: responseTime,
-      responseSize: responseSize,
-      path: req.path
-    }).catch(err => { });
+    aiClient
+      .post("/behavioural/telemetry", {
+        ip: clientIp,
+        requestId: requestId,
+        statusCode: statusCode,
+        responseTime: responseTime,
+        responseSize: responseSize,
+        path: req.path,
+      })
+      .catch((err) => {});
   });
 
   const training = isTrainingRequest(req, clientIp);
@@ -100,7 +102,7 @@ const wafMiddleware = async (req, res, next) => {
         responseTime: Date.now() - startTime,
         geo: req.geoData,
       })
-      .catch(() => { });
+      .catch(() => {});
 
     // Render the Blacklist page with additional details
     return res.status(403).render("blacklist", {
@@ -160,7 +162,7 @@ const wafMiddleware = async (req, res, next) => {
       totalPackets: requestData.totalPackets,
       requestId: requestId,
       trainingMode: training,
-      trainingSecret: training ? TRAINING_SECRET : undefined
+      trainingSecret: training ? TRAINING_SECRET : undefined,
     });
 
     const analysis = response.data;
@@ -178,7 +180,7 @@ const wafMiddleware = async (req, res, next) => {
         `🚫 WAF BLOCK: ${req.method} ${req.path} -> Motive: ${analysis.type} (Conf: ${analysis.confidence})`,
       );
 
-      return res.status(403).render("blocked", {
+      return res.status(403).render("behavioural_blocked", {
         error: "Request Blocked",
         reason:
           "Potential security threat or abnormal request pattern detected.",
@@ -199,7 +201,7 @@ const wafMiddleware = async (req, res, next) => {
         behavioral_result: analysis,
         requestId: requestId,
         trainingMode: training,
-        trainingSecret: training ? TRAINING_SECRET : undefined
+        trainingSecret: training ? TRAINING_SECRET : undefined,
       });
 
       const hybridAnalysis = hybridResponse.data;
@@ -222,7 +224,7 @@ const wafMiddleware = async (req, res, next) => {
           responseTime: responseTime,
           geo: req.geoData,
         })
-        .catch(() => { });
+        .catch(() => {});
 
       if (hybridAnalysis.blocked && training) {
         console.log(
@@ -268,7 +270,7 @@ const wafMiddleware = async (req, res, next) => {
         totalPackets: requestData.totalPackets,
         requestId: requestId,
         trainingMode: training,
-        trainingSecret: training ? TRAINING_SECRET : undefined
+        trainingSecret: training ? TRAINING_SECRET : undefined,
       });
 
       const fallbackAnalysis = fallbackResponse.data;
@@ -289,7 +291,7 @@ const wafMiddleware = async (req, res, next) => {
           responseTime: responseTime,
           geo: req.geoData,
         })
-        .catch(() => { });
+        .catch(() => {});
 
       if (fallbackAnalysis.blocked && training) {
         console.log(
